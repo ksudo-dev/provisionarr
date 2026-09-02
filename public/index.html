@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#091218">
+  <meta name="description" content="A simpler request and administration layer for the Servarr media stack.">
+  <title>Provisionarr</title>
+  <link rel="icon" href="/brand/provisionarr-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#page">Skip to content</a>
+  <main class="app">
+    <header class="topbar">
+      <a class="brand" href="#/home" aria-label="Provisionarr home"><img src="/brand/provisionarr-mark.svg" alt=""><span id="brand-name">Provisionarr</span></a>
+      <button id="mobile-menu" class="mobile-menu" type="button" aria-expanded="false" aria-controls="primary-nav">Menu</button>
+      <nav id="primary-nav" aria-label="Primary navigation">
+        <a data-route="home" data-audience="all" href="#/home">Home</a>
+        <a data-route="search" data-audience="all" href="#/search">Discover</a>
+        <a data-route="library" data-audience="all" href="#/library">Library</a>
+        <a data-route="requests" data-audience="all" href="#/requests">Requests</a>
+        <a data-route="notifications" data-audience="all" href="#/notifications">Notifications <span id="notification-count" class="nav-count" hidden>0</span></a>
+        <a data-route="account" data-audience="all" href="#/account">Account</a>
+        <span class="nav-divider" data-audience="owner" aria-hidden="true"></span>
+        <a data-route="admin" data-audience="owner" href="#/admin">Admin</a>
+        <a data-route="settings" data-audience="owner" href="#/settings">Settings</a>
+      </nav>
+      <div class="health" aria-live="polite">
+        <i id="health-dot" aria-hidden="true"></i>
+        <span id="health-label">Checking</span>
+        <button id="account" class="icon-button" type="button">Sign in</button>
+      </div>
+    </header>
+    <div id="page" tabindex="-1"></div>
+    <footer><span>Provisionarr</span><span>Privately operated by your system administrator</span></footer>
+  </main>
+
+  <dialog id="details" aria-labelledby="details-body">
+    <button class="dialog-close" id="close-details" type="button" aria-label="Close details">×</button>
+    <div id="details-body"></div>
+  </dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-body">
+    <button class="dialog-close" id="close-confirm" type="button" aria-label="Close confirmation">×</button>
+    <div id="confirm-body"></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

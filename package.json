@@ -1,0 +1,35 @@
+{
+  "name": "provisionarr",
+  "version": "1.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "A simple, secure request and administration layer for the ARR media stack",
+  "main": "server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "sonarr",
+    "radarr",
+    "prowlarr",
+    "qbittorrent",
+    "emby",
+    "media"
+  ],
+  "scripts": {
+    "start": "node server.js",
+    "public-safety": "./scripts/public-safety-scan.sh",
+    "stack:deploy": "node scripts/deploy-media-stack.mjs",
+    "test:arr": "./scripts/disposable-arr-smoke.sh",
+    "screenshots:release": "node scripts/capture-release-screenshots.mjs",
+    "check": "node --check server.js && node --check public/app.js",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test test/ui.spec.js"
+  },
+  "dependencies": {
+    "nodemailer": "9.0.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}

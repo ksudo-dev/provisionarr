@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  public-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Scan credentials and private deployment data
+        run: ./scripts/public-safety-scan.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - run: npm audit
+
+  container:
+    name: Container (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - name: Build image
+        run: docker buildx build --platform linux/${{ matrix.arch }} --load --tag provisionarr:test-${{ matrix.arch }} .
+      - name: Verify architecture
+        run: test "$(docker image inspect provisionarr:test-${{ matrix.arch }} --format '{{.Architecture}}')" = "${{ matrix.arch }}"
+      - name: Smoke test container
+        run: |
+          docker run --detach --name provisionarr-${{ matrix.arch }} --read-only --tmpfs /tmp --tmpfs /data:uid=1000,gid=1000 --publish 127.0.0.1:3100:3000 provisionarr:test-${{ matrix.arch }}
+          for attempt in $(seq 1 30); do curl --fail --silent http://127.0.0.1:3100/api/bootstrap && exit 0; sleep 2; done
+          docker logs provisionarr-${{ matrix.arch }}
+          exit 1

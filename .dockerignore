@@ -1,0 +1,12 @@
+.git
+.github
+.env*
+data
+docs
+node_modules
+test
+test-results
+playwright-report
+*.log
+*.jsonl
+setup-token.txt

@@ -1,0 +1,44 @@
+services:
+  provisionarr:
+    build: .
+    image: provisionarr:local
+    container_name: provisionarr
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      PROVISIONARR_LISTEN_HOST: "0.0.0.0"
+      SONARR_URL: "${SONARR_URL}"
+      SONARR_API_KEY: "${SONARR_API_KEY}"
+      RADARR_URL: "${RADARR_URL}"
+      RADARR_API_KEY: "${RADARR_API_KEY}"
+      PROWLARR_URL: "${PROWLARR_URL}"
+      PROWLARR_API_KEY: "${PROWLARR_API_KEY}"
+      PROVISIONARR_QBIT_URL: "${PROVISIONARR_QBIT_URL}"
+      PROVISIONARR_QBIT_USERNAME: "${PROVISIONARR_QBIT_USERNAME}"
+      PROVISIONARR_QBIT_PASSWORD: "${PROVISIONARR_QBIT_PASSWORD}"
+      PROVISIONARR_ORCHESTRATION_WRITES_ENABLED: "${PROVISIONARR_ORCHESTRATION_WRITES_ENABLED:-false}"
+      PROVISIONARR_MEDIA_ROOT: "${PROVISIONARR_MEDIA_ROOT:-/media}"
+      PROVISIONARR_EMBY_URL: "${PROVISIONARR_EMBY_URL}"
+      PROVISIONARR_EMBY_API_KEY: "${PROVISIONARR_EMBY_API_KEY}"
+      PROVISIONARR_ALLOW_INSECURE_UPSTREAMS: "${PROVISIONARR_ALLOW_INSECURE_UPSTREAMS:-false}"
+      PROVISIONARR_TRUST_PROXY: "${PROVISIONARR_TRUST_PROXY:-false}"
+      PROVISIONARR_SECURE_COOKIES: "${PROVISIONARR_SECURE_COOKIES:-true}"
+    volumes:
+      - ./data:/data
+      - "${PROVISIONARR_MEDIA_ROOT:-/media}:${PROVISIONARR_MEDIA_ROOT:-/media}:ro"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/bootstrap"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
