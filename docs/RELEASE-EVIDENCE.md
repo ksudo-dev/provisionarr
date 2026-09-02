@@ -17,7 +17,7 @@ turn an intended check into a passed check.
 - `PASS`: JavaScript syntax checks
 - `PASS`: 79 Node.js tests
 - `PASS`: two Playwright browser flows for guided setup and categorized media
-- `BLOCKED`: complete-history public-data scan requires historical cleanup
+- `PASS`: complete-history credential and public-data scan
 - `PENDING`: clean AMD64 installation on an independent host
 
 This snapshot records development evidence. It is not release evidence and does
