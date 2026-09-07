@@ -13,9 +13,9 @@ identifiers, filesystem paths, or raw upstream errors.
 ## Development status
 
 The existing-stack request and administration interface is the supported core.
-Managed-stack onboarding is under active development on the `onboarding`
-branch. It remains a preview until clean ARM64 and AMD64 installation, upgrade,
-and rollback checks are recorded.
+Managed-stack onboarding is available as preview code on `main`. It remains a
+preview until clean ARM64 and AMD64 installation, upgrade, and rollback checks
+are recorded.
 
 See [project scope](docs/PROJECT-SCOPE.md) before opening an issue or pull
 request. It separates the supported core, onboarding preview, contribution

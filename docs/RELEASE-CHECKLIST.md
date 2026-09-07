@@ -1,7 +1,9 @@
 # Release checklist
 
-Provisionarr stays private until every required gate has current evidence in
-the publication repository. An unchecked item is not a passed gate.
+Provisionarr's source repository may remain public while preview work is under
+development. Release tags, container images, and stable-release claims remain
+blocked until every required gate has current evidence. An unchecked item is
+not a passed gate.
 
 ## Product and installation
 
@@ -39,7 +41,7 @@ the publication repository. An unchecked item is not a passed gate.
 - [ ] Container release workflow has provenance and an SBOM enabled
 - [ ] Changelog and support policy identify the published release
 - [ ] Release tag points to the clean commit with passing checks
-- [ ] GitHub publication is complete only after all preceding items pass
+- [ ] Release publication is complete only after all preceding items pass
 
 ## Evidence rule
 

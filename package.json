@@ -24,7 +24,8 @@
     "screenshots:release": "node scripts/capture-release-screenshots.mjs",
     "check": "node --check server.js && node --check public/app.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "playwright test test/ui.spec.js"
+    "test:e2e": "playwright test test/orchestration-ui.spec.js",
+    "test:e2e:qa": "playwright test test/ui.spec.js"
   },
   "dependencies": {
     "nodemailer": "9.0.5"

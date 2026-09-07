@@ -159,6 +159,13 @@ async function main() {
   assertStatus(setup, 201, 'Provisionarr owner setup');
   owner = session(setup.response, setup.payload);
 
+  const selectedMode = await admin('/api/admin/orchestration/mode', {method: 'PUT', body: {mode: 'managed'}});
+  assertStatus(selectedMode, 200, 'Managed-stack mode selection');
+  assert.equal(selectedMode.payload.mode, 'managed');
+  const modeBootstrap = await admin('/api/bootstrap');
+  assertStatus(modeBootstrap, 200, 'Managed-stack mode persistence');
+  assert.equal(modeBootstrap.payload.setupMode, 'managed');
+
   await save('/api/admin/orchestration/connections/sonarr', {url: 'http://sonarr:8989', apiKey: env.DISPOSABLE_SONARR_KEY});
   await save('/api/admin/orchestration/connections/radarr', {url: 'http://radarr:7878', apiKey: env.DISPOSABLE_RADARR_KEY});
   await save('/api/admin/orchestration/connections/prowlarr', {url: 'http://prowlarr:9696', apiKey: env.DISPOSABLE_PROWLARR_KEY});

@@ -10,15 +10,20 @@ turn an intended check into a passed check.
 - Release commit: `PENDING`
 - Validation date: `PENDING`
 - Container image digest: `PENDING`
-- GitHub publication: `PENDING`
+- Release publication: `PENDING`
 
-## Onboarding branch snapshot
+## Current development snapshot
 
 - `PASS`: JavaScript syntax checks
 - `PASS`: 79 Node.js tests
 - `PASS`: two Playwright browser flows for guided setup and categorized media
 - `PASS`: complete-history credential and public-data scan
-- `PENDING`: clean AMD64 installation on an independent host
+- `PASS`: native ARM64 disposable lifecycle with separate existing-stack and
+  managed-stack Provisionarr instances
+- `PASS`: managed preview, apply, verification, controlled failure, automatic
+  recovery, manual rollback, restart, and container recreation
+- `PENDING`: native AMD64 disposable lifecycle in the new CI job
+- `PENDING`: release-to-release upgrade migration with `/data` preserved
 
 This snapshot records development evidence. It is not release evidence and does
 not promote managed onboarding out of preview.

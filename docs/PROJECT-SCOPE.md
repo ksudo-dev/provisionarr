@@ -18,7 +18,7 @@ Changes to this area must preserve existing installations and user data.
 
 ## Onboarding preview
 
-The onboarding branch is adding two explicit first-run choices:
+The onboarding preview on `main` provides two explicit first-run choices:
 
 1. Connect services that already exist.
 2. Prepare a managed Sonarr, Radarr, Prowlarr, and qBittorrent stack.

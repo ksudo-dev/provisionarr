@@ -37,11 +37,12 @@ pick_port() {
 
 used_ports=''
 pick_port app_port
+pick_port existing_app_port
 pick_port sonarr_port
 pick_port radarr_port
 pick_port prowlarr_port
 pick_port qbit_port
-mkdir -p "$work"/{sonarr,radarr,prowlarr,qbittorrent/qBittorrent,tv,movies,downloads,data,media}
+mkdir -p "$work"/{sonarr,radarr,prowlarr,qbittorrent/qBittorrent,tv,movies,downloads,data-managed,data-existing,media}
 printf '%s\n' '[Preferences]' 'WebUI\\AuthSubnetWhitelistEnabled=true' 'WebUI\\AuthSubnetWhitelist=0.0.0.0/0,::/0' >"$work/qbittorrent/qBittorrent/qBittorrent.conf"
 
 cat >"$compose" <<EOF
@@ -72,6 +73,7 @@ services:
     ports: ["127.0.0.1:$qbit_port:8080"]
     networks: [media]
   provisionarr:
+    image: provisionarr-disposable:$run_id
     build: $PROJECT_DIR
     environment:
       PORT: "3000"
@@ -89,8 +91,29 @@ services:
       PROWLARR_API_KEY: "\${DISPOSABLE_PROWLARR_KEY}"
       PROVISIONARR_QBIT_USERNAME: admin
       PROVISIONARR_QBIT_PASSWORD: "\${DISPOSABLE_QBIT_PASSWORD}"
-    volumes: ["$work/data:/data", "$work/media:/media"]
+    volumes: ["$work/data-managed:/data", "$work/media:/media"]
     ports: ["127.0.0.1:$app_port:3000"]
+    networks: [media]
+  provisionarr-existing:
+    image: provisionarr-disposable:$run_id
+    environment:
+      PORT: "3000"
+      PROVISIONARR_LISTEN_HOST: 0.0.0.0
+      PROVISIONARR_CONFIG_ROOT: /data
+      PROVISIONARR_REQUEST_LOG: /data/requests.json
+      PROVISIONARR_MEDIA_ROOT: /media
+      PROVISIONARR_ORCHESTRATION_WRITES_ENABLED: "true"
+      SONARR_URL: http://sonarr:8989
+      RADARR_URL: http://radarr:7878
+      PROWLARR_URL: http://prowlarr:9696
+      PROVISIONARR_QBIT_URL: http://qbittorrent:8080
+      SONARR_API_KEY: "\${DISPOSABLE_SONARR_KEY}"
+      RADARR_API_KEY: "\${DISPOSABLE_RADARR_KEY}"
+      PROWLARR_API_KEY: "\${DISPOSABLE_PROWLARR_KEY}"
+      PROVISIONARR_QBIT_USERNAME: admin
+      PROVISIONARR_QBIT_PASSWORD: "\${DISPOSABLE_QBIT_PASSWORD}"
+    volumes: ["$work/data-existing:/data", "$work/media:/media"]
+    ports: ["127.0.0.1:$existing_app_port:3000"]
     networks: [media]
 networks: {media: {}}
 EOF
@@ -155,18 +178,49 @@ docker run --rm --network "${project}_media" -e QBIT_PASSWORD="$qbit_password" n
   console.log(`Disposable qBittorrent direct API probe passed (unauthenticated status ${unauthorized.status}, login status ${login.status}).`);
 '
 
-export DISPOSABLE_SONARR_KEY="$sonarr_key" DISPOSABLE_RADARR_KEY="$radarr_key" DISPOSABLE_PROWLARR_KEY="$prowlarr_key" DISPOSABLE_QBIT_PASSWORD="$qbit_password"
-docker compose --project-name "$project" --file "$compose" up -d provisionarr >/dev/null
-wait_for_service provisionarr "http://127.0.0.1:$app_port/api/bootstrap"
-wait_for_file "$work/data/setup-token.txt"
-
-export DISPOSABLE_APP_URL="http://127.0.0.1:$app_port"
 export DISPOSABLE_SONARR_NATIVE_URL="http://127.0.0.1:$sonarr_port"
 export DISPOSABLE_RADARR_NATIVE_URL="http://127.0.0.1:$radarr_port"
 export DISPOSABLE_PROWLARR_NATIVE_URL="http://127.0.0.1:$prowlarr_port"
+export DISPOSABLE_SONARR_KEY="$sonarr_key" DISPOSABLE_RADARR_KEY="$radarr_key" DISPOSABLE_PROWLARR_KEY="$prowlarr_key" DISPOSABLE_QBIT_PASSWORD="$qbit_password"
+
+docker compose --project-name "$project" --file "$compose" up -d provisionarr-existing >/dev/null
+wait_for_service provisionarr-existing "http://127.0.0.1:$existing_app_port/api/bootstrap"
+wait_for_file "$work/data-existing/setup-token.txt"
+export DISPOSABLE_APP_URL="http://127.0.0.1:$existing_app_port"
 export DISPOSABLE_SETUP_TOKEN
-DISPOSABLE_SETUP_TOKEN=$(tr -d '\r\n' <"$work/data/setup-token.txt")
+DISPOSABLE_SETUP_TOKEN=$(tr -d '\r\n' <"$work/data-existing/setup-token.txt")
+node "$PROJECT_DIR/test/fixtures/disposable-arr-existing-setup.mjs"
+docker compose --project-name "$project" --file "$compose" restart provisionarr-existing >/dev/null
+wait_for_service provisionarr-existing "http://127.0.0.1:$existing_app_port/api/bootstrap"
+export DISPOSABLE_EXPECTED_MODE=existing
+node "$PROJECT_DIR/test/fixtures/disposable-arr-persistence.mjs"
+docker compose --project-name "$project" --file "$compose" stop provisionarr-existing >/dev/null
+
+docker compose --project-name "$project" --file "$compose" up -d provisionarr >/dev/null
+wait_for_service provisionarr "http://127.0.0.1:$app_port/api/bootstrap"
+wait_for_file "$work/data-managed/setup-token.txt"
+export DISPOSABLE_APP_URL="http://127.0.0.1:$app_port"
+DISPOSABLE_SETUP_TOKEN=$(tr -d '\r\n' <"$work/data-managed/setup-token.txt")
 if ! node "$PROJECT_DIR/test/fixtures/disposable-arr-guided-setup.mjs"; then
   docker compose --project-name "$project" --file "$compose" logs --no-color provisionarr 2>&1 | perl -pe 's/\Q$ENV{DISPOSABLE_SONARR_KEY}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_RADARR_KEY}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_PROWLARR_KEY}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_QBIT_PASSWORD}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_SETUP_TOKEN}\E/[redacted]/g' >&2 || true
   exit 1
 fi
+
+export DISPOSABLE_FAILURE_STATE="$work/failure-state.json"
+node "$PROJECT_DIR/test/fixtures/disposable-arr-failure-recovery.mjs" prepare
+docker compose --project-name "$project" --file "$compose" stop radarr >/dev/null
+node "$PROJECT_DIR/test/fixtures/disposable-arr-failure-recovery.mjs" apply
+docker compose --project-name "$project" --file "$compose" start radarr >/dev/null
+wait_for_service radarr "http://127.0.0.1:$radarr_port/api/v3/system/status" "X-Api-Key: $radarr_key"
+node "$PROJECT_DIR/test/fixtures/disposable-arr-failure-recovery.mjs" verify
+
+docker compose --project-name "$project" --file "$compose" restart provisionarr >/dev/null
+wait_for_service provisionarr "http://127.0.0.1:$app_port/api/bootstrap"
+export DISPOSABLE_EXPECTED_MODE=managed
+node "$PROJECT_DIR/test/fixtures/disposable-arr-persistence.mjs"
+
+docker compose --project-name "$project" --file "$compose" up -d --force-recreate provisionarr >/dev/null
+wait_for_service provisionarr "http://127.0.0.1:$app_port/api/bootstrap"
+node "$PROJECT_DIR/test/fixtures/disposable-arr-persistence.mjs"
+
+printf '%s\n' 'Disposable ARR lifecycle passed for separate existing-stack and managed-stack Provisionarr instances.'
