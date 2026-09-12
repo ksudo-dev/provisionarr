@@ -75,6 +75,7 @@ services:
   provisionarr:
     image: provisionarr-disposable:$run_id
     build: $PROJECT_DIR
+    user: "$(id -u):$(id -g)"
     environment:
       PORT: "3000"
       PROVISIONARR_LISTEN_HOST: 0.0.0.0
@@ -96,6 +97,7 @@ services:
     networks: [media]
   provisionarr-existing:
     image: provisionarr-disposable:$run_id
+    user: "$(id -u):$(id -g)"
     environment:
       PORT: "3000"
       PROVISIONARR_LISTEN_HOST: 0.0.0.0
@@ -131,6 +133,12 @@ wait_for_file() {
   return 1
 }
 
+redacted_logs() {
+  local service=$1
+  docker compose --project-name "$project" --file "$compose" logs --no-color "$service" 2>&1 |
+    perl -pe 'BEGIN {@secrets=grep {defined($_) && length($_)} @ENV{qw(DISPOSABLE_SONARR_KEY DISPOSABLE_RADARR_KEY DISPOSABLE_PROWLARR_KEY DISPOSABLE_QBIT_PASSWORD DISPOSABLE_SETUP_TOKEN)}} for $secret (@secrets) {s/\Q$secret\E/[redacted]/g}'
+}
+
 wait_for_service() {
   local service=$1 url=$2 header=${3:-} attempts=0
   while [ "$attempts" -lt 180 ]; do
@@ -142,6 +150,8 @@ wait_for_service() {
     attempts=$((attempts + 1)); sleep 1
   done
   printf 'Timed out waiting for disposable %s.\n' "$service" >&2
+  docker compose --project-name "$project" --file "$compose" ps "$service" >&2 || true
+  redacted_logs "$service" >&2 || true
   return 1
 }
 
@@ -167,15 +177,17 @@ wait_for_service sonarr "http://127.0.0.1:$sonarr_port/api/v3/system/status" "X-
 wait_for_service radarr "http://127.0.0.1:$radarr_port/api/v3/system/status" "X-Api-Key: $radarr_key"
 wait_for_service prowlarr "http://127.0.0.1:$prowlarr_port/api/v1/system/status" "X-Api-Key: $prowlarr_key"
 
-docker run --rm --network "${project}_media" -e QBIT_PASSWORD="$qbit_password" node:22-alpine node -e '
-  const unauthorized=await fetch("http://qbittorrent:8080/api/v2/app/version");
-  const form=new URLSearchParams({username:"admin",password:process.env.QBIT_PASSWORD});
-  const login=await fetch("http://qbittorrent:8080/api/v2/auth/login",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:form});
-  const loginBody=await login.text(),cookie=login.headers.get("set-cookie")?.split(";")[0]||"";
-  const version=await fetch("http://qbittorrent:8080/api/v2/app/version",{headers:{cookie}});
-  const accepted=(login.status===204)||(login.status===200&&/^ok\.?$/i.test(loginBody.trim()));
-  if(!accepted||!cookie||version.status!==200)throw new Error(`Direct qBittorrent API probe failed: login=${login.status}, accepted=${accepted}, cookie=${Boolean(cookie)}, version=${version.status}`);
-  console.log(`Disposable qBittorrent direct API probe passed (unauthenticated status ${unauthorized.status}, login status ${login.status}).`);
+docker compose --project-name "$project" --file "$compose" exec -T -e QBIT_PASSWORD="$qbit_password" sonarr sh -ec '
+  cookie_jar=/tmp/provisionarr-qbit-cookie
+  unauthenticated_status=$(curl --silent --show-error --output /dev/null --write-out "%{http_code}" http://qbittorrent:8080/api/v2/app/version)
+  login_result=$(curl --silent --show-error --cookie-jar "$cookie_jar" --output /tmp/provisionarr-qbit-login --write-out "%{http_code}" --request POST --data-urlencode "username=admin" --data-urlencode "password=$QBIT_PASSWORD" http://qbittorrent:8080/api/v2/auth/login)
+  login_body=$(tr -d "\r\n" </tmp/provisionarr-qbit-login)
+  cookie_present=no
+  grep -q SID "$cookie_jar" && cookie_present=yes
+  version_status=$(curl --silent --show-error --cookie "$cookie_jar" --output /dev/null --write-out "%{http_code}" http://qbittorrent:8080/api/v2/app/version)
+  rm -f "$cookie_jar" /tmp/provisionarr-qbit-login
+  { [ "$login_result" = "204" ] || [ "$login_body" = "Ok." ]; } && [ "$cookie_present" = yes ] && [ "$version_status" = "200" ] || { printf "Direct qBittorrent API probe failed: login=%s response=%s cookie=%s version=%s.\n" "$login_result" "$login_body" "$cookie_present" "$version_status" >&2; exit 1; }
+  printf "Disposable qBittorrent direct API probe passed (unauthenticated status %s).\n" "$unauthenticated_status"
 '
 
 export DISPOSABLE_SONARR_NATIVE_URL="http://127.0.0.1:$sonarr_port"
@@ -202,7 +214,7 @@ wait_for_file "$work/data-managed/setup-token.txt"
 export DISPOSABLE_APP_URL="http://127.0.0.1:$app_port"
 DISPOSABLE_SETUP_TOKEN=$(tr -d '\r\n' <"$work/data-managed/setup-token.txt")
 if ! node "$PROJECT_DIR/test/fixtures/disposable-arr-guided-setup.mjs"; then
-  docker compose --project-name "$project" --file "$compose" logs --no-color provisionarr 2>&1 | perl -pe 's/\Q$ENV{DISPOSABLE_SONARR_KEY}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_RADARR_KEY}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_PROWLARR_KEY}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_QBIT_PASSWORD}\E/[redacted]/g; s/\Q$ENV{DISPOSABLE_SETUP_TOKEN}\E/[redacted]/g' >&2 || true
+  redacted_logs provisionarr >&2 || true
   exit 1
 fi
 
