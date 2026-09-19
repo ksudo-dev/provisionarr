@@ -1,6 +1,6 @@
 # Release checklist
 
-We keep Provisionarr's source public while preview work continues. We won't
+I keep Provisionarr's source public while preview work continues. I won't
 publish release tags or container images, or call a build stable, until every
 required gate has current evidence. An unchecked item has not passed.
 
@@ -44,8 +44,8 @@ required gate has current evidence. An unchecked item has not passed.
 
 ## Evidence rule
 
-We record exact commands, commit identifiers, image digests, tested platforms,
+I record exact commands, commit identifiers, image digests, tested platforms,
 browser dimensions, install results, migration results, and rollback results in
-[RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md). We don't record API keys,
+[RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md). I don't record API keys,
 passwords, setup tokens, private URLs, private IP addresses, hostnames,
 filesystem paths, user data, or torrent identifiers.

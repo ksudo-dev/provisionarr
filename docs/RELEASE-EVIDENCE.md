@@ -1,6 +1,6 @@
 # Provisionarr release evidence
 
-We record verified release evidence here. `PENDING` means we have not
+I record verified release evidence here. `PENDING` means I have not
 recorded a passing result.
 
 ## Current status
@@ -25,7 +25,7 @@ recorded a passing result.
 - `PENDING`: native AMD64 disposable lifecycle in the new CI job
 - `PENDING`: release-to-release upgrade migration with `/data` preserved
 
-These results describe development validation. We don't count them as release
+These results describe development validation. I don't count them as release
 evidence or promote managed onboarding out of preview.
 
 ## Automated checks

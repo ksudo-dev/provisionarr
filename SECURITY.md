@@ -1,16 +1,16 @@
 # Security policy
 
-We designed Provisionarr as a small, authenticated interface in front of Sonarr, Radarr, Prowlarr, qBittorrent, and optional media services. Don't rely on it as an authorization boundary for those upstream services unless you follow the deployment guidance.
+I designed Provisionarr as a small, authenticated interface in front of Sonarr, Radarr, Prowlarr, qBittorrent, and optional media services. Don't rely on it as an authorization boundary for those upstream services unless you follow the deployment guidance.
 
 ## Supported version
 
-We support the latest published `1.x` release. When we publish a newer `1.x` release, we stop fixing earlier `1.x` releases. We don't support untagged commits or versions below `1.0.0` as release lines.
+I support the latest published `1.x` release. When I publish a newer `1.x` release, I stop fixing earlier `1.x` releases. I don't support untagged commits or versions below `1.0.0` as release lines.
 
 ## Reporting a vulnerability
 
-Our security contact is [@ksudo-dev](https://github.com/ksudo-dev). Do not open a public issue containing credentials, private URLs, file paths, exploit steps, or user data. Use GitHub's private vulnerability report form at `https://github.com/ksudo-dev/provisionarr/security/advisories/new`. Include the affected version, impact, reproduction steps, and any suggested mitigation.
+Report vulnerabilities to me as [@ksudo-dev](https://github.com/ksudo-dev). Do not open a public issue containing credentials, private URLs, file paths, exploit steps, or user data. Use GitHub's private vulnerability report form at `https://github.com/ksudo-dev/provisionarr/security/advisories/new`. Include the affected version, impact, reproduction steps, and any suggested mitigation.
 
-If the private report form is unavailable, wait until we restore it. Do not move the report into a public issue.
+If the private report form is unavailable, wait until I restore it. Do not move the report into a public issue.
 
 ## Security boundaries
 

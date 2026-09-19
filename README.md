@@ -2,7 +2,7 @@
 
 <img src="public/brand/provisionarr-mark.svg" alt="Provisionarr terminal, media, and wrench mark" width="112">
 
-We built Provisionarr as a request and administration layer for Sonarr,
+I built Provisionarr as a request and administration layer for Sonarr,
 Radarr, Prowlarr, and qBittorrent. Household users can search for movies and
 shows, request titles, and track request status. Administrators get a separate
 setup and operations surface.
@@ -37,7 +37,7 @@ qBittorrent through their native APIs. The current preview can:
 These capabilities aren't a supported managed installation yet. Keep write
 orchestration disabled outside an isolated test stack.
 
-We don't create indexer-provider credentials. Administrators add indexers in
+I don't create indexer-provider credentials. Administrators add indexers in
 Prowlarr, which then synchronizes them to the linked applications.
 
 Keep `PROVISIONARR_ORCHESTRATION_WRITES_ENABLED=false` while reviewing a plan.
@@ -110,5 +110,5 @@ release gate.
 
 ## License
 
-We license Provisionarr under the GNU Affero General Public License v3.0 only
+I license Provisionarr under the GNU Affero General Public License v3.0 only
 (`AGPL-3.0-only`).

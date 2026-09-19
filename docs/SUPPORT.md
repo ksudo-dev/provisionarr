@@ -2,7 +2,7 @@
 
 ## Supported releases
 
-We provide bug and security fixes for the latest published major release, as
+I provide bug and security fixes for the latest published major release, as
 stated in its release notes. Untagged commits and unreleased versions are
 development builds.
 
@@ -19,13 +19,13 @@ before attaching logs or screenshots. Use the private reporting process in
 
 ## Supported deployment scope
 
-We accept bug reports for the documented Docker and native installations,
+I accept bug reports for the documented Docker and native installations,
 fresh-stack onboarding, LAN access, tailnet-only HTTPS, and reviewed reverse
 proxy arrangements. Upstream Sonarr, Radarr, Prowlarr, qBittorrent, Emby,
 Docker, reverse-proxy, DNS, and operating-system defects belong in those
 projects' support channels.
 
-We don't provide indexer access, media files, copyright guidance,
+I don't provide indexer access, media files, copyright guidance,
 or support for exposing Sonarr, Radarr, Prowlarr, or qBittorrent directly to the
 internet.
 

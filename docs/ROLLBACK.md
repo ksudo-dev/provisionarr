@@ -1,9 +1,9 @@
 # Optional deploy and rollback adapter
 
-We provide this optional adapter to record the last deployed Provisionarr
+I provide this optional adapter to record the last deployed Provisionarr
 source and roll back application code with one command. Standalone
-installations can also follow [UPGRADE.md](UPGRADE.md). The adapter is not required to install or run
-Provisionarr.
+installations can also follow [UPGRADE.md](UPGRADE.md). The adapter is
+optional; Provisionarr runs without it.
 
 Run these from the Provisionarr checkout:
 

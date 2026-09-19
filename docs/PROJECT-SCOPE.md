@@ -1,6 +1,6 @@
 # Provisionarr project scope
 
-We maintain one Provisionarr product with two setup paths. Both lead to the
+I maintain one Provisionarr product with two setup paths. Both lead to the
 same request and administration interface.
 
 ## Supported core
@@ -14,7 +14,7 @@ qBittorrent installation. It provides:
 - request, download, import, health, and audit views; and
 - server-side credentials with owner-only administration.
 
-We require changes to this area to preserve existing installations and user data.
+I require changes to this area to preserve existing installations and user data.
 
 ## Onboarding preview
 
@@ -46,7 +46,7 @@ milestone.
 
 ## Deferred work
 
-We're deferring these features beyond the current release:
+I'm deferring these features beyond the current release:
 
 - VPN installation or interface binding;
 - automatic media movement across mounts;
@@ -62,6 +62,6 @@ review.
 
 ## Promotion rule
 
-We mark a preview feature as supported only after recording its API tests,
+I mark a preview feature as supported only after recording its API tests,
 browser flow, clean ARM64 installation, clean AMD64 installation, upgrade, and
 rollback checks in `docs/RELEASE-EVIDENCE.md`.

@@ -1,6 +1,6 @@
 # Contributing
 
-We're preparing Provisionarr for its first public release. Keep changes aligned with our central rule: ordinary users receive a simple media-request experience, while technical and destructive operations remain authenticated, owner-only, explicit, and auditable.
+I'm preparing Provisionarr for its first public release. Keep changes aligned with my central rule: ordinary users receive a simple media-request experience, while technical and destructive operations remain authenticated, owner-only, explicit, and auditable.
 
 Read `docs/PROJECT-SCOPE.md` before starting work. Choose one contribution
 lane and keep the pull request inside it. Managed-stack work is preview code

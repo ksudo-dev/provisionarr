@@ -56,7 +56,7 @@ an owner-only setup and operations surface for the ARR services.
 
 ## Access profiles
 
-We treat access as a deployment choice:
+I treat access as a deployment choice:
 
 - trusted LAN HTTP for local use;
 - tailnet-only HTTPS through a private service proxy;
@@ -66,12 +66,12 @@ We treat access as a deployment choice:
 Each remote recipe must keep upstream service ports private, require HTTPS,
 validate forwarded headers, document failure recovery, and include rollback.
 
-Remote access is documentation work for now. We won't change DNS,
+Remote access is documentation work for now. I won't change DNS,
 certificates, tunnels, or Tailscale settings from the application.
 
 ## Deferred storage actions
 
-We won't move media across mounts until the administrator defines
+I won't move media across mounts until the administrator defines
 approved source and destination roots, free-space thresholds, verification
-checks, and recovery behavior. We won't accept arbitrary paths or shell
+checks, and recovery behavior. I won't accept arbitrary paths or shell
 commands.

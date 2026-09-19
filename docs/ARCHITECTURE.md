@@ -1,8 +1,8 @@
 # Architecture
 
-We built Provisionarr as a Node.js service and browser application. The
-server translates a small set of user and administrator actions into fixed native API requests for
-Sonarr, Radarr, Prowlarr, and qBittorrent.
+I built Provisionarr as a Node.js service and browser application. The
+server translates a small set of user and administrator actions into fixed
+native API requests for Sonarr, Radarr, Prowlarr, and qBittorrent.
 
 ## Product surfaces
 
@@ -26,7 +26,7 @@ authorization control.
   progress, and the download-client configuration used by Sonarr and Radarr
 - Emby: existing-library synchronization and recommendation data
 
-We don't create indexer-provider credentials. The administrator adds
+I don't create indexer-provider credentials. The administrator adds
 the provider in Prowlarr, which remains responsible for synchronizing that
 indexer to linked applications.
 
@@ -64,13 +64,14 @@ Onboarding previews are short-lived and bound to the administrator who created
 them. The server rejects an expired, reused, or altered preview. Apply is
 serialized so two multi-service changes can't update the same stack at once.
 
-We don't open, move, execute, or classify rejected release files.
-Failed-release repair is sent to the owning Sonarr or Radarr API, which handles
-removal, deletion, blocklisting, and replacement search.
+I route failed-release repair through the owning Sonarr or Radarr API.
+Provisionarr never opens, moves, executes, or classifies rejected release
+files; the ARR service handles removal, deletion, blocklisting, and replacement
+search.
 
 ## Access profiles
 
-We support LAN HTTP, tailnet-only HTTPS, and administrator-managed
+I support LAN HTTP, tailnet-only HTTPS, and administrator-managed
 reverse proxies. Tailnet-only HTTPS is an access profile, not a product
 requirement. Public access needs a separate HTTPS and access-policy review.
 
