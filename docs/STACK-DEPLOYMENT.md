@@ -1,9 +1,9 @@
 # Generated stack deployment
 
-Provisionarr can generate a four-service Compose bundle for Sonarr, Radarr,
-Prowlarr, and qBittorrent. The web service returns the files; it doesn't
-receive a Docker socket or execute host commands. The system administrator
-chooses when and where to run the bundle.
+You can generate a four-service Compose bundle for Sonarr, Radarr, Prowlarr,
+and qBittorrent in Provisionarr. The web service returns the files; it doesn't
+receive a Docker socket or execute host commands. You choose when and where
+to run the bundle.
 
 The host deployment command requires Node.js 22 or newer, Docker Engine, and
 the Docker Compose plugin.

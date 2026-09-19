@@ -1,16 +1,16 @@
 # Security policy
 
-Provisionarr is designed to place a small, authenticated interface in front of Sonarr, Radarr, Prowlarr, qBittorrent, and optional media services. It must not be treated as an authorization boundary for those upstream services unless the deployment guidance is followed.
+We designed Provisionarr as a small, authenticated interface in front of Sonarr, Radarr, Prowlarr, qBittorrent, and optional media services. Don't rely on it as an authorization boundary for those upstream services unless you follow the deployment guidance.
 
 ## Supported version
 
-Provisionarr supports the latest `1.x` release. Earlier `1.x` releases stop receiving fixes when a newer `1.x` release is published. Commits without a release tag and versions below `1.0.0` are not supported release lines.
+We support the latest published `1.x` release. When we publish a newer `1.x` release, we stop fixing earlier `1.x` releases. We don't support untagged commits or versions below `1.0.0` as release lines.
 
 ## Reporting a vulnerability
 
-The security contact is the repository owner, [@ksudo-dev](https://github.com/ksudo-dev). Do not open a public issue containing credentials, private URLs, file paths, exploit steps, or user data. Use GitHub's private vulnerability report form at `https://github.com/ksudo-dev/provisionarr/security/advisories/new`. Include the affected version, impact, reproduction steps, and any suggested mitigation.
+Our security contact is [@ksudo-dev](https://github.com/ksudo-dev). Do not open a public issue containing credentials, private URLs, file paths, exploit steps, or user data. Use GitHub's private vulnerability report form at `https://github.com/ksudo-dev/provisionarr/security/advisories/new`. Include the affected version, impact, reproduction steps, and any suggested mitigation.
 
-If the private report form is unavailable, wait for the repository owner to restore it. Do not move the report into a public issue.
+If the private report form is unavailable, wait until we restore it. Do not move the report into a public issue.
 
 ## Security boundaries
 

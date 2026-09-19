@@ -2,10 +2,10 @@
 
 <img src="public/brand/provisionarr-mark.svg" alt="Provisionarr terminal, media, and wrench mark" width="112">
 
-Provisionarr is a request and administration layer for Sonarr, Radarr,
-Prowlarr, and qBittorrent. Users search for movies and shows, request titles,
-and track request status. The system administrator gets a separate setup and
-operations surface.
+We built Provisionarr as a request and administration layer for Sonarr,
+Radarr, Prowlarr, and qBittorrent. Household users can search for movies and
+shows, request titles, and track request status. Administrators get a separate
+setup and operations surface.
 
 Service credentials stay on the server. Users don't receive API keys, torrent
 identifiers, filesystem paths, or raw upstream errors.
@@ -37,19 +37,18 @@ qBittorrent through their native APIs. The current preview can:
 These capabilities aren't a supported managed installation yet. Keep write
 orchestration disabled outside an isolated test stack.
 
-Indexer provider credentials aren't created by Provisionarr. The system
-administrator adds an indexer in Prowlarr, then Prowlarr synchronizes it to the
-linked applications.
+We don't create indexer-provider credentials. Administrators add indexers in
+Prowlarr, which then synchronizes them to the linked applications.
 
 Keep `PROVISIONARR_ORCHESTRATION_WRITES_ENABLED=false` while reviewing a plan.
 The write path is owner-only and rejects an expired or altered preview.
 
 ## Run Provisionarr
 
-Provisionarr supports Docker and a native Node.js service. The web service can
-run without Docker; the generated four-service media bundle uses Docker Compose
-when that deployment option is selected. See [native installation](docs/NATIVE-INSTALL.md)
-for the systemd path.
+You can run Provisionarr in Docker or as a native Node.js service. The web
+service runs without Docker. The generated four-service media bundle uses
+Docker Compose when you select that deployment option. See
+[native installation](docs/NATIVE-INSTALL.md) for the systemd path.
 
 For a local checkout with Node.js 22 or newer:
 
@@ -111,5 +110,5 @@ release gate.
 
 ## License
 
-Provisionarr is licensed under the GNU Affero General Public License v3.0 only
+We license Provisionarr under the GNU Affero General Public License v3.0 only
 (`AGPL-3.0-only`).

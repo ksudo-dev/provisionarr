@@ -1,8 +1,8 @@
 # Optional deploy and rollback adapter
 
-This adapter records the last deployed Provisionarr source and provides a
-single-command code rollback. Standalone installations can also follow
-[UPGRADE.md](UPGRADE.md). The adapter is not required to install or run
+We provide this optional adapter to record the last deployed Provisionarr
+source and roll back application code with one command. Standalone
+installations can also follow [UPGRADE.md](UPGRADE.md). The adapter is not required to install or run
 Provisionarr.
 
 Run these from the Provisionarr checkout:
@@ -43,8 +43,8 @@ deleting. `--yes` skips confirmation.
 path. It restores the exact release registered by the most recent successful
 deployment while preserving `/data`.
 
-The tools intentionally do not restart Sonarr, Radarr, qBittorrent, or any
-other service.
+These tools only recreate the Provisionarr service. They leave Sonarr, Radarr,
+qBittorrent, and other stack services running.
 
 Set `PROVISIONARR_PROJECT_DIR`, `PROVISIONARR_RELEASE_ROOT`, or
 `PROVISIONARR_ROLLBACK_DIR` to use different locations.

@@ -1,9 +1,8 @@
 # Release checklist
 
-Provisionarr's source repository may remain public while preview work is under
-development. Release tags, container images, and stable-release claims remain
-blocked until every required gate has current evidence. An unchecked item is
-not a passed gate.
+We keep Provisionarr's source public while preview work continues. We won't
+publish release tags or container images, or call a build stable, until every
+required gate has current evidence. An unchecked item has not passed.
 
 ## Product and installation
 
@@ -28,8 +27,8 @@ not a passed gate.
 - [ ] CSRF, session, request-body, upstream URL, and rate-limit tests pass
 - [ ] Repository, package, image, and domain namespace review is complete
 - [ ] Approved source artwork and favicon are reproducible
-- [ ] `SECURITY.md` names the generic private reporting process
-- [ ] Support policy is documented without personal contact data
+- [ ] Confirm `SECURITY.md` names the private reporting process
+- [ ] Confirm the support policy contains no personal contact data
 
 ## Build and release
 
@@ -41,12 +40,12 @@ not a passed gate.
 - [ ] Container release workflow has provenance and an SBOM enabled
 - [ ] Changelog and support policy identify the published release
 - [ ] Release tag points to the clean commit with passing checks
-- [ ] Release publication is complete only after all preceding items pass
+- [ ] Publish the release only after all preceding items pass
 
 ## Evidence rule
 
-Record exact commands, commit identifiers, image digests, tested platforms,
+We record exact commands, commit identifiers, image digests, tested platforms,
 browser dimensions, install results, migration results, and rollback results in
-[RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md). Do not record API keys, passwords,
-setup tokens, private URLs, private IP addresses, hostnames, filesystem paths,
-user data, or torrent identifiers.
+[RELEASE-EVIDENCE.md](RELEASE-EVIDENCE.md). We don't record API keys,
+passwords, setup tokens, private URLs, private IP addresses, hostnames,
+filesystem paths, user data, or torrent identifiers.

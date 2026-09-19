@@ -1,7 +1,7 @@
 # Provisionarr release evidence
 
-This file records release evidence supplied by the release owner. It doesn't
-turn an intended check into a passed check.
+We record verified release evidence here. `PENDING` means we have not
+recorded a passing result.
 
 ## Current status
 
@@ -25,8 +25,8 @@ turn an intended check into a passed check.
 - `PENDING`: native AMD64 disposable lifecycle in the new CI job
 - `PENDING`: release-to-release upgrade migration with `/data` preserved
 
-This snapshot records development evidence. It is not release evidence and does
-not promote managed onboarding out of preview.
+These results describe development validation. We don't count them as release
+evidence or promote managed onboarding out of preview.
 
 ## Automated checks
 

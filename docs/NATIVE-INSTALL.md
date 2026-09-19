@@ -1,7 +1,7 @@
 # Native installation
 
-Provisionarr can run directly under systemd on Debian-like systems without
-Docker. This foundation deliberately performs no network downloads: production
+You can run Provisionarr directly under systemd on Debian-like systems without
+Docker. Our native installer performs no network downloads: production
 dependencies must already be present in the checkout or in the local npm cache.
 The host must provide Node.js 22 or newer.
 
@@ -40,8 +40,9 @@ fixed, allowlisted configuration workflow; each application creates a private
 configuration backup first and supports rollback from the administration UI.
 
 Put a separately reviewed reverse proxy or private access layer in front of
-the loopback listener if remote access is needed. This installer does not alter
-DNS, networking, certificates, firewall rules, or production deployments.
+the loopback listener if remote access is needed. We don't use this installer
+to alter DNS, networking, certificates, firewall rules, or production
+deployments.
 The service accepts HTTP for loopback, private LAN, Tailnet, and local service
 upstream names. Public upstream addresses still require HTTPS.
 
@@ -70,7 +71,7 @@ sudo ./scripts/uninstall-native.sh --purge --yes
 
 ## Scope and limitations
 
-This is a bounded installation path. It does not install Node.js, Sonarr,
+We keep the native installation path bounded. It doesn't install Node.js, Sonarr,
 Radarr, Prowlarr, qBittorrent, a reverse proxy, or any system packages. The
 guided workflow inventories Sonarr and Radarr, translates a small, allowlisted
 settings surface, and can configure the fresh-stack resources described above.
