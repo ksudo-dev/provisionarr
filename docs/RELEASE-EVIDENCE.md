@@ -22,11 +22,32 @@ recorded a passing result.
   managed-stack Provisionarr instances
 - `PASS`: managed preview, apply, verification, controlled failure, automatic
   recovery, manual rollback, restart, and container recreation
-- `PENDING`: native AMD64 disposable lifecycle in the new CI job
-- `PENDING`: release-to-release upgrade migration with `/data` preserved
+- `PASS`: native AMD64 disposable lifecycle in CI run `35649519776`
+- `PASS`: disposable version upgrade and rollback with `/data` preserved on
+  ARM64 and native AMD64 (details below)
+- `PENDING`: tagged release-to-release upgrade migration with `/data` preserved
 
 These results describe development validation. I don't count them as release
-evidence or promote managed onboarding out of preview.
+candidate evidence or promote managed onboarding out of preview.
+
+## Disposable version upgrade and rollback trial
+
+- Date: 2026-09-21
+- Baseline: `f74fcbd8064f791d88d36250c969d1d6a4960c00`
+- Upgraded version: `93a5b4c83598b2fcc14a811cb07779e90b5f683a`
+- Command: `npm run test:upgrade`
+- Native AMD64: `PASS` in [CI run 35649519776](https://github.com/ksudo-dev/provisionarr/actions/runs/35649519776), with all seven jobs passing
+- Native ARM64: `PASS` in the local disposable run
+- AMD64 baseline image ID: `sha256:69540015328c5d8d1367411deda53b6060532925e26e5439e13e7f4e77f4ce62`
+- AMD64 upgraded image ID: `sha256:89b2148fab3e2b9fac17c01cdef5295bcb31f0055ca32f3e21251cb46f9bdb4e`
+
+The test starts the baseline image, sets up an owner, changes settings and
+onboarding mode through its API, then verifies account, settings, request,
+saved connection, audit, and recovery records after baseline recreation,
+upgrade, and rollback. Every version uses the same temporary `/data` directory.
+The request, saved connections, and recovery record are synthetic files in that
+directory. The trial does not exercise real ARR services, a published release
+tag, or a production installation. Those release checks remain pending.
 
 ## Automated checks
 
