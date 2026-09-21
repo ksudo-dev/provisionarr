@@ -43,6 +43,23 @@ jobs:
       - name: Validate both onboarding modes and recovery
         run: npm run test:arr
 
+  amd64-upgrade:
+    name: Disposable version upgrade and rollback (AMD64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Confirm native AMD64 runner
+        run: test "$(uname -m)" = "x86_64"
+      - name: Verify version upgrade and rollback persistence
+        run: npm run test:upgrade
+
   browser:
     name: Browser flows
     runs-on: ubuntu-latest

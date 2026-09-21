@@ -21,6 +21,7 @@
     "public-safety": "./scripts/public-safety-scan.sh",
     "stack:deploy": "node scripts/deploy-media-stack.mjs",
     "test:arr": "./scripts/disposable-arr-smoke.sh",
+    "test:upgrade": "./scripts/disposable-upgrade-smoke.sh",
     "screenshots:release": "node scripts/capture-release-screenshots.mjs",
     "check": "node --check server.js && node --check public/app.js",
     "test": "node --test test/*.test.js",
