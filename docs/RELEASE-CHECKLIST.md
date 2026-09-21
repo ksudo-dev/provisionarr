@@ -6,7 +6,8 @@ required gate has current evidence. An unchecked item has not passed.
 
 ## Product and installation
 
-- [ ] Sonarr, Radarr, Prowlarr, and qBittorrent connection tests pass
+- [x] Sonarr, Radarr, Prowlarr, and qBittorrent connection tests pass on the
+  isolated four-service stack ([evidence](RELEASE-EVIDENCE.md#isolated-arr-connection-trial))
 - [ ] Fresh-stack onboarding creates or retains both ARR root folders
 - [ ] Fresh-stack onboarding registers qBittorrent with separate TV and movie
   categories

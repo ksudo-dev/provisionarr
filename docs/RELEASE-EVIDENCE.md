@@ -69,8 +69,31 @@ app exited with `EACCES`. I created `./data` as that user and reran the trial;
 [UPGRADE.md](UPGRADE.md) now states the prerequisite.
 
 The public repository had no release tags or GitHub releases when I ran this
-trial. A tagged release-to-release migration, real ARR connections, and a
-production installation remain pending.
+trial. A tagged release-to-release migration, production ARR connections,
+and a production installation remain pending.
+
+## Isolated ARR connection trial
+
+- Date: 2026-09-21
+- Commit: `258be0919e43f700f133717ba249ba395be617c7`
+- Command: `npm run test:arr`
+- Native ARM64: `PASS` on the local host
+- Native AMD64: `PASS` in [CI run 35650918778](https://github.com/ksudo-dev/provisionarr/actions/runs/35650918778)
+- Provisionarr image ID on ARM64: `sha256:ec3077055b242d23cf076aa7456b7f9a6590a9c6e120920d243e6af592534e28`
+- Service images: Sonarr `sha256:60f3b6b5c7647ba2bafd81163acfe34b11117b9b834ebd7fbcc3e5f1b309c7ef`,
+  Radarr `sha256:079e48870584baf2a3e7e43e7ba6d3c834555931851a59c82c51cc792d285caf`,
+  Prowlarr `sha256:a89f252d6a22bd25af14a5380aec0adcc3c3af2e3282164f981680e6844070f3`,
+  qBittorrent `sha256:eeea9f8a8cdde23555186843d26e8ded1222421f31f98a5cc1b50c2882ebcf4e`
+
+I started fresh disposable Sonarr, Radarr, Prowlarr, and qBittorrent containers.
+Their native API checks passed with credentials generated inside the isolated
+stack; qBittorrent rejected an unauthenticated request and accepted a login
+and session cookie. Provisionarr saved all four connections through its owner
+API. Its existing-stack and guided-setup inventories reported every service
+connected. The guided test also passed root-folder, qBittorrent client,
+Prowlarr link, rollback, and persistence checks. The disposable containers and
+volumes were removed after the run. These checks used an isolated development
+commit; production connections and release candidate validation remain pending.
 
 ## Automated checks
 
@@ -97,10 +120,10 @@ production installation remain pending.
 
 ## ARR onboarding checks
 
-- `PENDING`: Sonarr connection and native API test
-- `PENDING`: Radarr connection and native API test
-- `PENDING`: Prowlarr connection and native API test
-- `PENDING`: qBittorrent connection and native API test
+- `PASS`: Sonarr connection and native API test on isolated development commit `258be09`
+- `PASS`: Radarr connection and native API test on isolated development commit `258be09`
+- `PASS`: Prowlarr connection and native API test on isolated development commit `258be09`
+- `PASS`: qBittorrent connection and native API test on isolated development commit `258be09`
 - `PENDING`: Sonarr root-folder creation or retention
 - `PENDING`: Radarr root-folder creation or retention
 - `PENDING`: qBittorrent registration in Sonarr with the TV category
