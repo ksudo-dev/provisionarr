@@ -4,6 +4,11 @@ These steps apply to the standalone `compose.yaml` installation. The bind mount 
 
 ## Before an upgrade
 
+The Compose service runs as `PUID:PGID`. Before its first start, create `./data`
+and make sure those IDs can write to it. If Compose creates the missing bind
+mount as root, Provisionarr exits with `EACCES` while writing settings. For an
+installation owned by the configured user, run `install -d -m 700 data`.
+
 Record the current release and create a private backup:
 
 ```sh
@@ -21,7 +26,7 @@ Fetch the release tag, check it out, rebuild the image, and recreate only the Pr
 
 ```sh
 git fetch --tags --prune
-git checkout 1.0.0
+git checkout RELEASE_TAG
 docker compose build --pull provisionarr
 docker compose up -d --no-deps provisionarr
 curl --fail --silent http://127.0.0.1:3000/api/bootstrap

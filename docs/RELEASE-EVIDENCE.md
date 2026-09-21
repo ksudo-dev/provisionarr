@@ -49,6 +49,29 @@ The request, saved connections, and recovery record are synthetic files in that
 directory. The trial does not exercise real ARR services, a published release
 tag, or a production installation. Those release checks remain pending.
 
+## Disposable Compose upgrade trial
+
+- Date: 2026-09-21
+- Platform: native ARM64 host, Docker Compose v5.0.1
+- Baseline commit: `f74fcbd8064f791d88d36250c969d1d6a4960c00`
+- Upgraded commit: `c5342411ff398080a9e10977689c449a5375af02`
+- Baseline image ID: `sha256:ba27fd6bdfc33d1c84941579635a2072f5bcdcdbcf5e8b864512777d58f5da09`
+- Upgraded image ID: `sha256:ec3077055b242d23cf076aa7456b7f9a6590a9c6e120920d243e6af592534e28`
+- Result: `PASS` for baseline recreation, Compose rebuild and upgrade, and
+  Compose rebuild and rollback with one temporary `./data` bind mount
+
+I used a temporary local clone, an isolated Compose project, and loopback-only
+synthetic service URLs. The owner, settings, request, saved connections, audit,
+and recovery fixture passed the same verification after each container change.
+The first start exposed an installation prerequisite: when `./data` was absent,
+Docker created a directory the configured `PUID:PGID` could not write, and the
+app exited with `EACCES`. I created `./data` as that user and reran the trial;
+[UPGRADE.md](UPGRADE.md) now states the prerequisite.
+
+The public repository had no release tags or GitHub releases when I ran this
+trial. A tagged release-to-release migration, real ARR connections, and a
+production installation remain pending.
+
 ## Automated checks
 
 - `PENDING`: syntax checks
