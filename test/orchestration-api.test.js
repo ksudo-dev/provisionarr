@@ -370,6 +370,8 @@ test('orchestration inventory is owner-only and never exposes upstream secrets',
   assert.equal(planPayload.canApply, true);
   assert.equal(JSON.stringify(planPayload).includes('must-not-leak'), false);
 
+  sonarr.current['/api/v3/config/mediamanagement'].externalSetting = 'changed-after-preview';
+
   const apply = await fetch(`${base}/api/admin/orchestration/plans/${planPayload.planId}/apply`, {
     method:'POST',headers:{'content-type':'application/json',cookie:owner.cookie,'x-csrf-token':owner.csrf},body:'{}'
   });
@@ -379,6 +381,7 @@ test('orchestration inventory is owner-only and never exposes upstream secrets',
   assert.ok(applied.backup);
   assert.equal(sonarr.puts.length + radarr.puts.length, 2);
   assert.equal(sonarr.puts[0].body.renameEpisodes, false);
+  assert.equal(sonarr.puts[0].body.externalSetting, 'changed-after-preview');
   assert.equal(radarr.puts[0].body.enableCompletedDownloadHandling, false);
 
   const backupsResponse = await fetch(`${base}/api/admin/orchestration/backups`, {headers:{cookie:owner.cookie}});
