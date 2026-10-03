@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import freshProwlarrHealth from './fresh-prowlarr-health.cjs';
 
 const env = process.env;
+const {isExpectedFreshProwlarrHealthFailure} = freshProwlarrHealth;
 const base = env.DISPOSABLE_APP_URL;
 const required = [
   'DISPOSABLE_APP_URL',
@@ -271,7 +273,7 @@ async function main() {
     );
     const nativeFailures = nativeHealth.filter(item => ['error', 'fatal'].includes(String(item.type || item.level || '').toLowerCase()));
     assert.equal(
-      nativeFailures.length > 0 && nativeFailures.every(item => /indexer/i.test(JSON.stringify(item))),
+      nativeFailures.length > 0 && nativeFailures.every(isExpectedFreshProwlarrHealthFailure),
       true,
       `Fresh Prowlarr reported a failing health condition unrelated to its expected missing indexer provider: ${JSON.stringify(nativeFailures)}`
     );
