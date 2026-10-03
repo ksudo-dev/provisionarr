@@ -734,12 +734,15 @@ async function applyOrchestrationPlan(req, planId, session) {
   const requests=arrOrchestrator.applicationRequests(record.plan);
   if(!requests.length)return {ok:true,message:'No changes were needed.',changes:0};
   orchestrationApplyLocked=true;
-  const backup={id:crypto.randomUUID(),createdAt:new Date().toISOString(),createdBy:session.user.id,status:'created',planId,resources:record.resources};
+  let backup={id:crypto.randomUUID(),createdAt:new Date().toISOString(),createdBy:session.user.id,status:'created',planId,resources:record.resources};
   saveOrchestrationBackup(backup);
   const applied=[];
   try{
+    const current=await currentOrchestrationSnapshot();
+    backup.resources=current.resources;
+    saveOrchestrationBackup(backup);
     for(const request of requests){
-      const original=record.resources.find(resource=>resource.service===request.service&&resource.path===request.path);
+      const original=current.resources.find(resource=>resource.service===request.service&&resource.path===request.path);
       if(!original)throw new Error('The change preview no longer matches its backup.');
       const response=await api(services[request.service],request.path,'PUT',{...original.body,...request.body});
       if(response.status<200||response.status>=300)throw new Error(`${orchestrationLabel(services[request.service])} rejected a settings change.`);
@@ -752,9 +755,8 @@ async function applyOrchestrationPlan(req, planId, session) {
     record.used=true;backup.status='applied';backup.appliedAt=new Date().toISOString();backup.verifiedAt=backup.appliedAt;saveOrchestrationBackup(backup);audit(req,'orchestration_applied',{userId:session.user.id,backupId:backup.id,changes:record.plan.changes.length,verified:true});
     return {ok:true,message:`Applied ${record.plan.changes.length} safe ${record.plan.changes.length===1?'change':'changes'}.`,changes:record.plan.changes.length,backup:{id:backup.id,createdAt:backup.createdAt,status:backup.status}};
   }catch(error){
-    if(applied.length){try{await restoreOrchestrationResources(applied);backup.status='automatically_rolled_back';backup.rolledBackAt=new Date().toISOString();}catch(rollbackError){backup.status='rollback_failed';backup.rollbackError=rollbackError.message;}}
-    else backup.status='failed';
-    backup.error=error.message;saveOrchestrationBackup(backup);audit(req,'orchestration_apply_failed',{userId:session.user.id,backupId:backup.id,status:backup.status});throw error;
+    if(backup){if(applied.length){try{await restoreOrchestrationResources(applied);backup.status='automatically_rolled_back';backup.rolledBackAt=new Date().toISOString();}catch(rollbackError){backup.status='rollback_failed';backup.rollbackError=rollbackError.message;}}else backup.status='failed';backup.error=error.message;saveOrchestrationBackup(backup);audit(req,'orchestration_apply_failed',{userId:session.user.id,backupId:backup.id,status:backup.status});}
+    throw error;
   }finally{orchestrationApplyLocked=false;}
 }
 

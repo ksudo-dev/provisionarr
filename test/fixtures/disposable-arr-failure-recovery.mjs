@@ -83,10 +83,10 @@ async function apply() {
   assert.equal(backups.response.status, 200);
   const backup = backups.payload.backups.find(item => item.planId === state.planId);
   assert.ok(backup, 'Controlled failure did not create a rollback record.');
-  assert.equal(backup.status, 'automatically_rolled_back', `Controlled failure ended in ${backup.status}.`);
+  assert.equal(backup.status, 'failed', `Fresh-read failure ended in ${backup.status}.`);
   state.backupId = backup.id;
   fs.writeFileSync(stateFile, JSON.stringify(publicState(state)), {mode:0o600});
-  console.log('Disposable controlled failure triggered automatic rollback.');
+  console.log('Disposable fresh-read failure created no upstream writes.');
 }
 
 async function verify() {
