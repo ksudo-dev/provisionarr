@@ -48,6 +48,11 @@ const NOTIFICATION_STATE_FILE = env('PROVISIONARR_NOTIFICATION_STATE_FILE', 'ARR
 const SESSION_FILE = env('PROVISIONARR_SESSION_FILE', 'ARR_HOME_SESSION_FILE', path.join(DATA_ROOT, 'sessions.json'));
 const ORCHESTRATION_WRITES_ENABLED = env('PROVISIONARR_ORCHESTRATION_WRITES_ENABLED', 'ARR_HOME_ORCHESTRATION_WRITES_ENABLED', 'false') === 'true';
 const FIXTURE_ADMIN_CONTROLS = env('PROVISIONARR_FIXTURE_ADMIN_CONTROLS', 'ARR_HOME_FIXTURE_ADMIN_CONTROLS', 'false') === 'true';
+// This transport is deliberately separate from configured ARR connections. It
+// exists only for isolated fixture tests and is disabled unless both flags are set.
+const TEST_FIXTURE_MONITOR_TRANSPORT = env('PROVISIONARR_TEST_FIXTURE_MONITOR_TRANSPORT', 'ARR_HOME_TEST_FIXTURE_MONITOR_TRANSPORT', 'false') === 'true';
+const TEST_FIXTURE_MONITOR_SEED = env('PROVISIONARR_TEST_FIXTURE_MONITOR_SEED', 'ARR_HOME_TEST_FIXTURE_MONITOR_SEED', '');
+const TEST_FIXTURE_MONITOR_MODE = env('PROVISIONARR_TEST_FIXTURE_MONITOR_MODE', 'ARR_HOME_TEST_FIXTURE_MONITOR_MODE', 'success');
 const TVMAZE_ENABLED = env('PROVISIONARR_TVMAZE_ENABLED', 'ARR_HOME_TVMAZE_ENABLED', 'false') === 'true';
 const TVMAZE_PAGE = Math.max(0, Math.min(1000, Number.parseInt(env('PROVISIONARR_TVMAZE_PAGE', 'ARR_HOME_TVMAZE_PAGE', '0'), 10) || 0));
 const TVMAZE_FIXTURE_MODE = env('PROVISIONARR_TVMAZE_FIXTURE_MODE', 'ARR_HOME_TVMAZE_FIXTURE_MODE', 'false') === 'true';
@@ -69,6 +74,17 @@ const orchestrationPlans = new Map();
 const bootstrapPlans = new Map();
 const prowlarrPlans = new Map();
 const adminCatalogPlans = new Map();
+function loadFixtureMonitorStore() {
+  if (!TEST_FIXTURE_MONITOR_TRANSPORT) return new Map();
+  let parsed;try{parsed=JSON.parse(TEST_FIXTURE_MONITOR_SEED||'{}');}catch{return new Map();}
+  const store=new Map();
+  for(const type of ['movie','series'])for(const item of (Array.isArray(parsed?.[type])?parsed[type]:[])){
+    const id=String(item?.id||'');if(/^[1-9]\d*$/.test(id))store.set(`${type}:${id}`,JSON.parse(JSON.stringify(item)));
+  }
+  return store;
+}
+const fixtureMonitorStore = loadFixtureMonitorStore();
+const fixtureMonitorReads = new Map();
 let orchestrationApplyLocked = false;
 const MAP_LIMITS = {sessions:5000, pendingActions:2000, mediaRefs:10000, rateLimits:10000, orchestrationPlans:200, bootstrapPlans:100, prowlarrPlans:100, adminCatalogPlans:200};
 
@@ -888,10 +904,15 @@ function tvmazeRequest() {
   });
 }
 function tvmazeGenericPage() { return cachedAsync(`tvmaze-generic-page:${TVMAZE_PAGE}`,10*60*1000,()=>tvmazeRequest()); }
+function safeTvmazePoster(value) {
+  if(typeof value!=='string'||value.length>2048)return null;
+  let target;try{target=new url.URL(value);}catch{return null;}
+  return target.protocol==='https:'&&target.hostname==='static.tvmaze.com'&&!target.username&&!target.password&&!target.port&&!target.search&&!target.hash&&target.pathname.startsWith('/uploads/images/')?target.toString():null;
+}
 function tvmazeMedia(raw) {
   const tvmazeId=Number(raw?.id),tvdbId=Number(raw?.externals?.thetvdb);
   if(!Number.isInteger(tvmazeId)||tvmazeId<1||!Number.isInteger(tvdbId)||tvdbId<1||!String(raw?.name||'').trim())return null;
-  const item={id:tvmazeId,tvmazeId,tvdbId,kind:'series',service:'TV',serviceId:'sonarr',title:String(raw.name).trim().slice(0,240),year:Number.parseInt(String(raw.premiered||'').slice(0,4),10)||null,releaseDate:raw.premiered||null,rating:Number.isFinite(Number(raw.rating?.average))?Number(raw.rating.average):null,overview:String(raw.summary||'').replace(/<[^>]*>/g,'').trim().slice(0,2000),poster:raw.image?.medium||null,seasons:[]};
+  const item={id:tvmazeId,tvmazeId,tvdbId,kind:'series',service:'TV',serviceId:'sonarr',title:String(raw.name).trim().slice(0,240),year:Number.parseInt(String(raw.premiered||'').slice(0,4),10)||null,releaseDate:raw.premiered||null,rating:Number.isFinite(Number(raw.rating?.average))?Number(raw.rating.average):null,overview:String(raw.summary||'').replace(/<[^>]*>/g,'').trim().slice(0,2000),poster:safeTvmazePoster(raw.image?.medium),seasons:[]};
   return {...item,identity:`series:tvmaze:${tvmazeId}`,identities:new Set([`series:tvmaze:${tvmazeId}`,`series:tvdb:${tvdbId}`]),reason:'Generic TV catalog'};
 }
 async function sonarrLookupValidTvdb(tvdbId) {
@@ -975,6 +996,20 @@ const ADMIN_CATALOG_TYPES=Object.freeze({movie:services.radarr,series:services.s
 const ADMIN_CATALOG_VIEWS=new Set(['missing','cutoff','calendar']);
 const RADARR_MINIMUM_AVAILABILITY=new Set(['announced','inCinemas','released','preDB']);
 function fixtureAdminGate() { if(!FIXTURE_ADMIN_CONTROLS)throw Object.assign(new Error('Fixture-only catalog administration is disabled on this instance.'),{statusCode:409,code:'FIXTURE_ADMIN_ONLY'});for(const service of [services.sonarr,services.radarr]){let target;try{target=new url.URL(service.url)}catch{throw Object.assign(new Error('Fixture-only catalog administration requires valid loopback services.'),{statusCode:409,code:'FIXTURE_ADMIN_LOOPBACK_ONLY'});}if(!isLoopbackHost(target.hostname))throw Object.assign(new Error('Fixture-only catalog administration requires loopback Sonarr and Radarr targets.'),{statusCode:409,code:'FIXTURE_ADMIN_LOOPBACK_ONLY'});} }
+function fixtureMonitorGate() { if(!FIXTURE_ADMIN_CONTROLS||!TEST_FIXTURE_MONITOR_TRANSPORT)throw Object.assign(new Error('Fixture-only monitor execution is disabled on this instance.'),{statusCode:409,code:'FIXTURE_ADMIN_ONLY'});if(!fixtureMonitorStore.size)throw Object.assign(new Error('The in-memory fixture monitor transport is unavailable.'),{statusCode:409,code:'FIXTURE_MONITOR_TRANSPORT_UNAVAILABLE'}); }
+function fixtureMonitorRead(type,id) {
+  const key=`${type}:${id}`,item=fixtureMonitorStore.get(key);if(!item)throw Object.assign(new Error('The fixture catalog item could not be read back.'),{statusCode:404,code:'CATALOG_ITEM_UNAVAILABLE'});
+  const reads=(fixtureMonitorReads.get(key)||0)+1;fixtureMonitorReads.set(key,reads);
+  if(TEST_FIXTURE_MONITOR_MODE==='stale-on-confirm'&&reads===2)item.title=`${item.title} changed`;
+  return JSON.parse(JSON.stringify(item));
+}
+function fixtureMonitorWrite(type,id,monitored) {
+  const key=`${type}:${id}`,item=fixtureMonitorStore.get(key);if(!item)throw Object.assign(new Error('The fixture catalog item could not be read back.'),{statusCode:404,code:'CATALOG_ITEM_UNAVAILABLE'});
+  if(TEST_FIXTURE_MONITOR_MODE==='put-fail')throw Object.assign(new Error('The fixture monitoring update failed.'),{code:'FIXTURE_MONITOR_WRITE_FAILED'});
+  item.monitored=monitored;
+  if(TEST_FIXTURE_MONITOR_MODE==='readback-mismatch')item.monitored=!monitored;
+  return JSON.parse(JSON.stringify(item));
+}
 function adminCatalogService(type) { const service=ADMIN_CATALOG_TYPES[String(type||'')];if(!service)throw Object.assign(new Error('Choose Movies or TV.'),{statusCode:400,code:'CATALOG_TYPE_INVALID'});return service; }
 function adminItemId(value) { const id=String(value||'');if(!/^[1-9]\d*$/.test(id))throw Object.assign(new Error('The catalog item identifier is invalid.'),{statusCode:400,code:'CATALOG_ITEM_INVALID'});return id; }
 function safeAdminItem(item,service) { return {id:Number(item?.id)||null,title:orchestrationString(titleFrom(item),'Untitled',160),type:service.type,monitored:item?.monitored===true,qualityProfileId:orchestrationNumber(item?.qualityProfileId),rootFolderPath:orchestrationString(item?.rootFolderPath,'',1024)||null,tags:Array.isArray(item?.tags)?item.tags.filter(Number.isInteger):[],minimumAvailability:service.id==='radarr'?orchestrationString(item?.minimumAvailability,'',40)||null:null,seasons:service.type==='series'?(Array.isArray(item?.seasons)?item.seasons.map(season=>({seasonNumber:orchestrationNumber(season?.seasonNumber),monitored:season?.monitored===true})).filter(season=>season.seasonNumber!==null):[]):undefined}; }
@@ -992,20 +1027,18 @@ function catalogRevision(item) { return crypto.createHash('sha256').update(JSON.
 async function readAdminCatalogItem(service,id) { const response=await api(service,`/api/v3/${service.type}/${encodeURIComponent(id)}`);if(response.status<200||response.status>=300||!response.data||String(response.data.id)!==String(id))throw Object.assign(new Error('The catalog item could not be read back.'),{statusCode:404,code:'CATALOG_ITEM_UNAVAILABLE'});return JSON.parse(JSON.stringify(response.data)); }
 function monitorPlanPublic(plan) { return {id:plan.id,type:plan.type,action:'monitor',itemId:plan.itemId,before:plan.before,after:plan.after,revision:plan.revision,createdAt:plan.createdAt,expiresAt:plan.expiresAt,writesEnabled:true,fixtureOnly:true}; }
 async function previewFixtureMonitor(body,session) {
-  fixtureAdminGate();exactKeys(body,new Set(['type','itemId','monitored']));if(typeof body.monitored!=='boolean')throw Object.assign(new Error('Monitoring must be true or false.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});
-  const service=adminCatalogService(body.type),id=adminItemId(body.itemId),rawBefore=await readAdminCatalogItem(service,id),before=safeAdminItem(rawBefore,service),after={...before,seasons:before.seasons?[...before.seasons]:undefined,tags:[...before.tags],monitored:body.monitored},now=Date.now();
-  const plan={id:crypto.randomUUID(),type:service.type,action:'monitor',fixtureMonitorExecution:true,itemId:id,before,after,rawBefore,revision:catalogRevision(rawBefore),createdAt:new Date(now).toISOString(),expiresAt:new Date(now+2*60*1000).toISOString(),userId:session.user.id,expires:now+2*60*1000,used:false};setBounded(adminCatalogPlans,plan.id,plan,MAP_LIMITS.adminCatalogPlans);return monitorPlanPublic(plan);
+  fixtureMonitorGate();exactKeys(body,new Set(['type','itemId','monitored']));if(typeof body.monitored!=='boolean')throw Object.assign(new Error('Monitoring must be true or false.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});
+  const service=adminCatalogService(body.type),id=adminItemId(body.itemId),rawBefore=fixtureMonitorRead(service.type,id),before=safeAdminItem(rawBefore,service),after={...before,seasons:before.seasons?[...before.seasons]:undefined,tags:[...before.tags],monitored:body.monitored},now=Date.now();
+  const plan={id:crypto.randomUUID(),type:service.type,action:'monitor',fixtureMonitorExecution:true,itemId:id,before,after,revision:catalogRevision(rawBefore),createdAt:new Date(now).toISOString(),expiresAt:new Date(now+2*60*1000).toISOString(),userId:session.user.id,expires:now+2*60*1000,used:false};setBounded(adminCatalogPlans,plan.id,plan,MAP_LIMITS.adminCatalogPlans);return monitorPlanPublic(plan);
 }
 async function confirmFixtureMonitor(body,session,req) {
-  fixtureAdminGate();exactKeys(body,new Set(['planId']));const plan=adminCatalogPlans.get(String(body.planId||''));
+  fixtureMonitorGate();exactKeys(body,new Set(['planId']));const plan=adminCatalogPlans.get(String(body.planId||''));
   if(!plan||plan.action!=='monitor'||plan.fixtureMonitorExecution!==true||plan.expires<Date.now()||plan.userId!==session.user.id||plan.used)throw Object.assign(new Error('The monitor confirmation expired. Review the item again.'),{statusCode:409,code:'CATALOG_PLAN_EXPIRED'});
   plan.used=true;const service=adminCatalogService(plan.type);let current;
-  try{current=await readAdminCatalogItem(service,plan.itemId);}catch(error){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_READBACK_FAILED'});throw error;}
+  try{current=fixtureMonitorRead(service.type,plan.itemId);}catch(error){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_READBACK_FAILED'});throw error;}
   if(catalogRevision(current)!==plan.revision){audit(req,'admin_catalog_monitor_fixture_stale',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_STALE'});throw Object.assign(new Error('The catalog item changed after preview. No fixture write was made.'),{statusCode:409,code:'CATALOG_PLAN_STALE'});}
-  const payload={...current,monitored:plan.after.monitored};let written;
-  try{written=await api(service,`/api/v3/${service.type}/${encodeURIComponent(plan.itemId)}`,'PUT',payload);}catch(error){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_PUT_FAILED'});throw Object.assign(new Error('The fixture monitoring update failed. No success was reported.'),{statusCode:502,code:'CATALOG_MONITOR_PUT_FAILED'});}
-  if(written.status<200||written.status>=300){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_PUT_FAILED'});throw Object.assign(new Error('The fixture monitoring update failed. No success was reported.'),{statusCode:502,code:'CATALOG_MONITOR_PUT_FAILED'});}
-  const finalRaw=await readAdminCatalogItem(service,plan.itemId),finalState=safeAdminItem(finalRaw,service);if(JSON.stringify(stableCatalogValue(finalState))!==JSON.stringify(stableCatalogValue(plan.after))){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_READBACK_MISMATCH'});throw Object.assign(new Error('Fixture read-back did not match the reviewed monitoring state.'),{statusCode:502,code:'CATALOG_MONITOR_READBACK_MISMATCH'});}
+  try{fixtureMonitorWrite(service.type,plan.itemId,plan.after.monitored);}catch(error){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_PUT_FAILED'});throw Object.assign(new Error('The fixture monitoring update failed. No success was reported.'),{statusCode:502,code:'CATALOG_MONITOR_PUT_FAILED'});}
+  const finalState=safeAdminItem(fixtureMonitorRead(service.type,plan.itemId),service);if(JSON.stringify(stableCatalogValue(finalState))!==JSON.stringify(stableCatalogValue(plan.after))){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_READBACK_MISMATCH'});throw Object.assign(new Error('Fixture read-back did not match the reviewed monitoring state.'),{statusCode:502,code:'CATALOG_MONITOR_READBACK_MISMATCH'});}
   audit(req,'admin_catalog_monitor_fixture_executed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_EXECUTED'});return {ok:true,outcome:'FIXTURE_EXECUTED',item:finalState};
 }
 async function previewAdminCatalogChange(body,session) {
