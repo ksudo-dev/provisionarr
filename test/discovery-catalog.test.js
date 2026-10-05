@@ -119,6 +119,10 @@ function sonarrValidationServer() {
 
 function embyRecommendationServer() {
   const calls=[];
+  const sharedLibrary=[
+    {Id:'shared-movie',Type:'Movie',Name:'Shared Library Movie',ProviderIds:{Tmdb:'701'},ProductionYear:2024,CommunityRating:8.2,DateCreated:'2025-01-02T00:00:00Z'},
+    {Id:'shared-series',Type:'Series',Name:'Shared Library Show',ProviderIds:{Tvdb:'702'},ProductionYear:2023,CommunityRating:8.7,DateCreated:'2025-01-03T00:00:00Z'}
+  ];
   const byUser={
     'emby-a':{
       library:[{Id:'a-library',Type:'Movie',Name:'A Library Seed',ProviderIds:{Tmdb:'101'}}],
@@ -144,6 +148,7 @@ function embyRecommendationServer() {
   const server=http.createServer((request,response)=>{
     calls.push(request.url);
     response.setHeader('content-type','application/json');
+    if(request.url.startsWith('/Items?'))return response.end(JSON.stringify({Items:sharedLibrary}));
     const match=request.url.match(/^\/Users\/([^/]+)\/Items/);
     if(match){const user=byUser[match[1]];if(!user){response.statusCode=404;return response.end('{}');}return response.end(JSON.stringify(request.url.includes('Filters=IsPlayed')?{Items:user.history}:{Items:user.library}));}
     const similar=request.url.match(/^\/Items\/([^/]+)\/Similar/);
@@ -302,6 +307,7 @@ test('linked Emby recommendations remain private, typed, deduplicated, unowned, 
   ];
   const fixture=await startProvisionarr(t,{RADARR_URL:`http://127.0.0.1:${radarrPort}`,PROVISIONARR_EMBY_URL:`http://127.0.0.1:${embyPort}`,PROVISIONARR_EMBY_API_KEY:'fixture-key'},users);
   const discover=async cookie=>(await fetch(`${fixture.base}/api/discover`,{headers:{cookie}})).json();
+  const library=async (cookie,type,sort)=>(await (await fetch(`${fixture.base}/api/library?type=${type}&sort=${sort}`,{headers:{cookie}})).json());
   const a=await discover(fixture.cookie),aInspired=[...a.movies.rails.inspired,...a.tv.rails.inspired],aPersonal=aInspired.filter(item=>item.title.startsWith('A Personal'));
   assert.deepEqual(aPersonal.map(item=>item.title).sort(),['A Personal Recommendation']);
   assert.equal(aInspired.some(item=>item.title==='A Owned Candidate'),false);
@@ -311,6 +317,12 @@ test('linked Emby recommendations remain private, typed, deduplicated, unowned, 
   const b=await discover(await fixture.loginAs('userb'));
   assert.equal([...b.movies.rails.inspired,...b.tv.rails.inspired].some(item=>item.title==='A Personal Recommendation'),false);
   assert.equal(b.movies.rails.inspired.some(item=>item.title==='B Personal Recommendation'),true);
+  const bCookie=await fixture.loginAs('userb');
+  const [aMovies,bMovies,aTv,bTv]=await Promise.all([library(fixture.cookie,'movie','title'),library(bCookie,'movie','title'),library(fixture.cookie,'series','rating'),library(bCookie,'series','rating')]);
+  assert.deepEqual(aMovies.items.map(item=>item.title),['Shared Library Movie']);assert.deepEqual(bMovies.items.map(item=>item.title),aMovies.items.map(item=>item.title));
+  assert.deepEqual(aTv.items.map(item=>item.title),['Shared Library Show']);assert.deepEqual(bTv.items.map(item=>item.title),aTv.items.map(item=>item.title));
+  assert.equal(aMovies.type,'movie');assert.equal(aTv.type,'series');assert.equal(aTv.sort,'rating');
+  assert.equal((await fetch(`${fixture.base}/api/admin/overview`,{headers:{cookie:fixture.cookie}})).status,403);assert.equal((await fetch(`${fixture.base}/api/admin/overview`,{headers:{cookie:bCookie}})).status,403);
   const unlinked=await discover(await fixture.loginAs('unlinked'));
   assert.equal([...unlinked.movies.rails.inspired,...unlinked.tv.rails.inspired].filter(item=>item.reason.startsWith('Because you ')).length,0);
   assert.equal(unlinked.personalized,false);
