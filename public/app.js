@@ -89,13 +89,18 @@ function setNavVisibility() {
   });
   const current = (location.hash.match(/^#\/([^?]+)/) || [,'home'])[1];
   $$('[data-route]').forEach(link => link.classList.toggle('active', link.dataset.route === current));
+  const active=$(`[data-route="${current}"]`),menu=$('#mobile-menu');
+  if(menu&&active){const label=active.textContent.trim();menu.textContent=`Menu · ${label}`;menu.setAttribute('aria-label',`Open navigation menu; current section ${label}`);}
 }
 
-function poster(item, className = '') {
+function poster(item, className = '', options = {}) {
   const availability=item.availability==='library_or_monitored'?'In library':item.availability==='can_request'?'Request':'View';
+  const releaseLabel=item.releaseDate ? new Date(item.releaseDate).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}) : (item.year || 'Unknown release date');
+  const rating=item.rating!==null&&item.rating!==undefined&&String(item.rating).trim()!==''&&Number.isFinite(Number(item.rating))?`Rating ${Number(item.rating).toFixed(1)}`:'';
+  const metadata=options.libraryRating ? [releaseLabel,rating].filter(Boolean).join(' · ') : (item.reason || releaseLabel);
   return `<button class="poster ${className}" type="button" data-item='${esc(JSON.stringify(item))}' aria-label="View ${esc(item.title)}">
     ${item.poster ? `<img src="${esc(item.poster)}" alt="${esc(item.title)} poster" loading="lazy">` : '<div class="poster-empty" aria-hidden="true">No artwork</div>'}
-    <span class="poster-badge">${esc(availability)}</span><div class="poster-copy"><h3>${esc(item.title)}</h3><p>${esc(item.year || '')}${item.mediaType ? ` · ${esc(item.mediaType)}` : ''}</p></div>
+    <span class="poster-badge">${esc(availability)}</span>${item.fixture?'<span class="poster-fixture">Synthetic fixture</span>':''}<div class="poster-copy"><h3>${esc(item.title)}</h3><p>${esc(metadata)}</p></div>
   </button>`;
 }
 
@@ -106,8 +111,8 @@ function bindPosters() {
   });
 }
 
-function renderRail(items, className = '') {
-  return items?.length ? items.map(item => poster(item, className)).join('') : '<div class="empty">Nothing here yet.</div>';
+function renderRail(items, className = '', options = {}) {
+  return items?.length ? items.map(item => poster(item, className, options)).join('') : '<div class="empty">Nothing here yet.</div>';
 }
 
 function mediaCategory(item) {
@@ -132,6 +137,25 @@ function discoveryCategory(title, type, sources) {
     return `<section class="media-category-row"><div class="section-title"><h3>${esc(source.label)}</h3><span class="section-icon">${esc(source.icon)}</span></div><div class="poster-rail">${renderRail(items)}</div></section>`;
   }).filter(Boolean).join('');
   return `<section class="media-category"><div class="media-category-heading"><small>DISCOVER</small><h2>${esc(title)}</h2></div>${rows || '<div class="empty">Nothing here yet.</div>'}</section>`;
+}
+
+function discoveryState(title, type, catalog) {
+  if (!catalog || catalog.status === 'unavailable') {
+    return `<section class="media-category"><div class="media-category-heading"><small>DISCOVER</small><h2>${esc(title)}</h2></div><div class="catalog-state unavailable"><strong>${esc(title)} recommendations are unavailable.</strong><span>${esc(catalog?.message || 'Try again when the connected service is available.')}</span></div></section>`;
+  }
+  if (catalog.status === 'empty') {
+    return `<section class="media-category"><div class="media-category-heading"><small>DISCOVER</small><h2>${esc(title)}</h2></div><div class="catalog-state"><strong>No new ${esc(title.toLowerCase())} right now.</strong><span>${esc(catalog.message || 'Everything matching this rail is already in your library or media plan.')}</span></div></section>`;
+  }
+  const rails=catalog.rails || {};
+  if (catalog.generic) {
+    return `<section class="media-category"><div class="media-category-heading"><small>DISCOVER</small><h2>${esc(title)}</h2></div><p class="catalog-attribution">${esc(catalog.attribution || 'Generic TV catalog data.')}</p>${discoveryCategory('Generic TV catalog', type, [{label:'Generic TV catalog',icon:'◎',items:rails.catalog || []}])}</section>`;
+  }
+  return discoveryCategory(title, type, [
+    {label:'Inspired by your library',icon:'✦',items:rails.inspired || []},
+    {label:'Trending now',icon:'↗',items:rails.trending || []},
+    {label:'Popular',icon:'★',items:rails.popular || []},
+    {label:'New releases',icon:'＋',items:rails.newReleases || []}
+  ]);
 }
 
 function searchCategory(title, items) {
@@ -230,31 +254,36 @@ function showProposal(proposal) {
   };
 }
 
-function searchBox() {
-  return '<div class="searchbox"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg><label class="sr-only" for="query">Search movies and shows</label><input id="query" placeholder="Search movies and shows" autocomplete="off"><button id="go" type="button">Search</button></div>';
+function catalogControls({type='movie',upcoming=false,library=false,sort='title'}={}) {
+  const contexts=library
+    ? `<option value="movie" ${type==='movie'?'selected':''}>Movies</option><option value="series" ${type==='series'?'selected':''}>TV</option>`
+    : `<option value="movie" ${type==='movie'?'selected':''}>Movies</option><option value="series" ${type==='series'?'selected':''}>TV</option><option value="library">Library</option>`;
+  return `<div class="catalog-controls"><label>Browse<select id="catalog-context">${contexts}</select></label>${library?`<label>Sort<select id="catalog-sort"><option value="title" ${sort==='title'?'selected':''}>Title</option><option value="dateAdded" ${sort==='dateAdded'?'selected':''}>Date added</option><option value="releaseYear" ${sort==='releaseYear'?'selected':''}>Release year</option><option value="rating" ${sort==='rating'?'selected':''}>Rating</option></select></label>`:`<label class="catalog-upcoming"><input id="catalog-upcoming" type="checkbox" ${upcoming?'checked':''}> Include upcoming</label>`}</div>`;
+}
+function bindCatalogControls({type='movie',upcoming=false,library=false,sort='title',query='',discover=false}={}) {
+  const context=$('#catalog-context'); if(!context)return;
+  const navigate=()=>{const selected=context.value;if(library){location.hash=`#/library?type=${encodeURIComponent(['movie','series'].includes(selected)?selected:type)}&sort=${encodeURIComponent($('#catalog-sort')?.value||sort)}`;return;}if(selected==='library'){location.hash=`#/library?type=${encodeURIComponent(type)}&sort=${encodeURIComponent($('#catalog-sort')?.value||sort)}`;return;}if(discover){location.hash=`#/home?type=${encodeURIComponent(selected)}${$('#catalog-upcoming')?.checked?'&upcoming=1':''}`;return;}const params=new URLSearchParams();if(query)params.set('query',query);params.set('type',selected);if($('#catalog-upcoming')?.checked)params.set('upcoming','1');location.hash=`#/search?${params}`;};
+  context.onchange=navigate; $('#catalog-sort')?.addEventListener('change',navigate); $('#catalog-upcoming')?.addEventListener('change',navigate);
+}
+function searchBox(context={}) {
+  return `<div class="searchbox"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg><label class="sr-only" for="query">Search movies and shows</label><input id="query" placeholder="Search movies and shows" autocomplete="off"><button id="go" type="button">Search</button></div>`;
 }
 
-function bindSearch() {
-  const go = () => { const query = $('#query').value.trim(); if (query) location.hash = `#/search?query=${encodeURIComponent(query)}`; };
+function bindSearch(context={}) {
+  const go = () => { const query = $('#query').value.trim(); if (query) { const params=new URLSearchParams({query});if(context.type)params.set('type',context.type);if(context.upcoming)params.set('upcoming','1');location.hash = `#/search?${params}`; } };
   $('#go').onclick = go;
   $('#query').onkeydown = event => { if (event.key === 'Enter') go(); };
 }
 
-async function renderHome() {
+async function renderHome(params = new URLSearchParams()) {
   const displayName = bootstrap.user?.displayName || bootstrap.user?.username || '';
-  const generation=routeGeneration;
-  $('#page').innerHTML = `<section class="hero"><div class="intro">${displayName ? `<small class="welcome">Welcome, ${esc(displayName)}</small>` : ''}<h1>What do you want to watch?</h1>${searchBox()}<p>Search once. Provisionarr handles the complicated parts.</p></div><div class="featured"><div class="feature-copy"><small>CURATED FOR YOUR LIBRARY</small><h2>Your next favorite is waiting.</h2><p>Browse personal recommendations, current favorites, and new releases. Request a title in two clicks.</p><a class="primary" href="#/search">Explore everything <b>›</b></a></div></div></section><div id="discover-catalog" class="discover-catalog"><div class="empty">Loading recommendations…</div></div>`;
-  bindSearch();
+  const generation=routeGeneration,type=['movie','series'].includes(params.get('type'))?params.get('type'):'movie',upcoming=params.get('upcoming')==='1';
+  $('#page').innerHTML = `<section class="hero"><div class="intro">${displayName ? `<small class="welcome">Welcome, ${esc(displayName)}</small>` : ''}<h1>What do you want to watch?</h1>${searchBox({type,upcoming})}<p>Search once. Provisionarr handles the complicated parts.</p></div><div class="featured"><div class="feature-copy"><small>CURATED FOR YOUR LIBRARY</small><h2>Your next favorite is waiting.</h2><p>Browse personal recommendations, current favorites, and new releases. Request a title in two clicks.</p><a class="primary" href="#/search">Explore everything <b>›</b></a></div></div></section>${catalogControls({type,upcoming})}<div id="discover-catalog" class="discover-catalog"><div class="empty">Loading recommendations…</div></div>`;
+  bindSearch({type,upcoming});bindCatalogControls({type,upcoming,discover:true});
   try {
-    const data = await api('/api/discover');
+    const data = await api(`/api/discover?type=${encodeURIComponent(type)}${upcoming?'&upcoming=1':''}`);
     if(generation!==routeGeneration)return;
-    const sources=[
-      {label:'Inspired by your library',icon:'✦',items:data.inspired || []},
-      {label:'Trending now',icon:'↗',items:data.trending || []},
-      {label:'Popular',icon:'★',items:data.popular || []},
-      {label:'New releases',icon:'＋',items:data.newReleases || []}
-    ];
-    $('#discover-catalog').innerHTML=discoveryCategory('Movies','movie',sources)+discoveryCategory('TV shows','series',sources);
+    $('#discover-catalog').innerHTML=type==='series'?discoveryState('TV shows','series',data.tv):discoveryState('Movies','movie',data.movies);
     bindPosters();
   } catch (error) {
     if(generation!==routeGeneration)return;
@@ -263,19 +292,21 @@ async function renderHome() {
   }
 }
 
-async function renderSearch(query = '') {
+async function renderSearch(query = '', params = new URLSearchParams()) {
   const generation=routeGeneration;
+  const type=['movie','series'].includes(params.get('type'))?params.get('type'):'movie',upcoming=params.get('upcoming')==='1',page=Math.max(1,Number(params.get('page'))||1);
   const intent = searchIntent(query);
-  $('#page').innerHTML = `<section class="page-heading"><div><small>DISCOVER</small><h1>Find something to watch</h1><p>Search by title. Add a season when you want a specific season of a show.</p></div>${searchBox()}</section><section class="section"><div class="section-title"><h2>${query ? `Closest matches for “${esc(query)}”` : 'Search results'}</h2></div><p class="search-note">${intent.season ? `Season ${intent.season} is used to find the show. The connected service applies its normal request defaults.` : 'Only close title matches are shown so unrelated results stay out of the way.'}</p><div id="search-categories"><div class="empty">Type a title above to begin.</div></div></section>`;
-  bindSearch();
+  $('#page').innerHTML = `<section class="page-heading"><div><small>DISCOVER</small><h1>Find something to watch</h1><p>Search by title. Add a season when you want a specific season of a show.</p></div>${searchBox({type,upcoming})}</section>${catalogControls({type,upcoming})}<section class="section"><div class="section-title"><h2>${query ? `Closest matches for “${esc(query)}”` : 'Search results'}</h2></div><p class="search-note">${intent.season ? `Season ${intent.season} is used to find the show. The connected service applies its normal request defaults.` : 'Only close title matches are shown so unrelated results stay out of the way.'}</p><div id="search-categories"><div class="empty">Type a title above to begin.</div></div><div id="search-pagination" class="catalog-pagination"></div></section>`;
+  bindSearch({type,upcoming}); bindCatalogControls({type,upcoming,query});
   if (!query) return;
   $('#query').value = query;
   try {
-    const data = await api(`/api/search?q=${encodeURIComponent(query)}`);
+    const data = await api(`/api/search?q=${encodeURIComponent(query)}&type=${encodeURIComponent(type)}&page=${page}${upcoming?'&upcoming=1':''}`);
     if(generation!==routeGeneration)return;
     const results = rankSearchResults(data.results || [], query);
     const categories=splitMedia(results);
     $('#search-categories').innerHTML = results.length ? searchCategory('Movies',categories.movie)+searchCategory('TV shows',categories.series) : `<div class="empty search-empty"><strong>No close match found.</strong><span>Try the title without extra words, or check the spelling.</span></div>`;
+    $('#search-pagination').innerHTML=data.totalPages>1?`<span>Page ${data.page} of ${data.totalPages}</span>${page>1?`<a class="secondary" href="#/search?query=${encodeURIComponent(query)}&type=${type}${upcoming?'&upcoming=1':''}&page=${page-1}">Previous</a>`:''}${data.hasMore?`<a class="secondary" href="#/search?query=${encodeURIComponent(query)}&type=${type}${upcoming?'&upcoming=1':''}&page=${page+1}">Next</a>`:''}`:'';
     bindPosters();
   } catch (error) { if(generation!==routeGeneration)return;$('#search-categories').innerHTML = errorPanel(error.message, `#/search?query=${encodeURIComponent(query)}`);bindRetry(); }
 }
@@ -367,13 +398,16 @@ function renderAccount() {
   $('#logout').onclick = logout;
 }
 
-async function renderLibrary() {
+async function renderLibrary(params = new URLSearchParams()) {
   const generation=routeGeneration;
-  $('#page').innerHTML = `<section class="page-heading"><div><small>EMBY LIBRARY</small><h1>Existing in your library</h1><p>These titles are ready from your Emby server. Search Discover when you want something new.</p></div></section><section class="section"><div id="library-grid" class="poster-grid"><div class="empty">Synchronizing with Emby…</div></div></section>`;
+  const type=['movie','series'].includes(params.get('type'))?params.get('type'):'movie',sort=['title','dateAdded','releaseYear','rating'].includes(params.get('sort'))?params.get('sort'):'title',page=Math.max(1,Number(params.get('page'))||1);
+  $('#page').innerHTML = `<section class="page-heading"><div><small>EMBY LIBRARY</small><h1>Existing in your library</h1><p>Only titles you already own appear here. Exact release dates are shown when known.</p></div></section>${catalogControls({type,library:true,sort})}<section class="section"><div id="library-grid" class="poster-grid"><div class="empty">Synchronizing with Emby…</div></div><div id="library-pagination" class="catalog-pagination"></div></section>`;
+  bindCatalogControls({type,library:true,sort});
   try {
-    const data = await api('/api/library');
+    const data = await api(`/api/library?type=${encodeURIComponent(type)}&sort=${encodeURIComponent(sort)}&page=${page}`);
     if(generation!==routeGeneration)return;
-    $('#library-grid').innerHTML = renderRail(data.items || [], 'library-poster');
+    $('#library-grid').innerHTML = data.status==='unavailable'?`<div class="catalog-state unavailable"><strong>Library is unavailable.</strong><span>${esc(data.message||'Emby is not configured.')}</span></div>`:renderRail(data.items || [], 'library-poster',{libraryRating:sort==='rating'});
+    $('#library-pagination').innerHTML=data.totalPages>1?`<span>Page ${data.page} of ${data.totalPages}</span>${page>1?`<a class="secondary" href="#/library?type=${type}&sort=${sort}&page=${page-1}">Previous</a>`:''}${data.hasMore?`<a class="secondary" href="#/library?type=${type}&sort=${sort}&page=${page+1}">Next</a>`:''}`:'';
     bindPosters();
   } catch (error) { if(generation!==routeGeneration)return;$('#library-grid').innerHTML = errorPanel(error.message,'#/library');bindRetry(); }
 }
@@ -975,8 +1009,8 @@ async function route() {
   setNav(name);
   if (bootstrap.adminConfigured && !bootstrap.authenticated && !['account','settings'].includes(name)) { location.hash = '#/account'; return renderAccount(); }
   const params = new URLSearchParams(queryString || '');
-  if (name === 'search') return renderSearch(params.get('query') || '');
-  if (name === 'library') return renderLibrary();
+  if (name === 'search') return renderSearch(params.get('query') || '', params);
+  if (name === 'library') return renderLibrary(params);
   if (name === 'requests') return renderRequests();
   if (name === 'notifications') return renderNotifications();
   if (name === 'account') return renderAccount();
@@ -987,7 +1021,7 @@ async function route() {
   if (name === 'status') return renderStatus();
   if (name === 'logs') return renderLogs();
   if (name === 'settings') return bootstrap.adminConfigured ? renderSettings(params.get('section') || 'general') : renderSetup();
-  return renderHome();
+  return renderHome(params);
 }
 
 async function loadHealth() {
