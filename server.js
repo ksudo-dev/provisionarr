@@ -47,6 +47,17 @@ const AUDIT_FILE = env('PROVISIONARR_AUDIT_FILE', 'ARR_HOME_AUDIT_FILE', path.jo
 const NOTIFICATION_STATE_FILE = env('PROVISIONARR_NOTIFICATION_STATE_FILE', 'ARR_HOME_NOTIFICATION_STATE_FILE', path.join(DATA_ROOT, 'notification-state.json'));
 const SESSION_FILE = env('PROVISIONARR_SESSION_FILE', 'ARR_HOME_SESSION_FILE', path.join(DATA_ROOT, 'sessions.json'));
 const ORCHESTRATION_WRITES_ENABLED = env('PROVISIONARR_ORCHESTRATION_WRITES_ENABLED', 'ARR_HOME_ORCHESTRATION_WRITES_ENABLED', 'false') === 'true';
+const FIXTURE_ADMIN_CONTROLS = env('PROVISIONARR_FIXTURE_ADMIN_CONTROLS', 'ARR_HOME_FIXTURE_ADMIN_CONTROLS', 'false') === 'true';
+// This transport is deliberately separate from configured ARR connections. It
+// exists only for isolated fixture tests and is disabled unless both flags are set.
+const TEST_FIXTURE_MONITOR_TRANSPORT = env('PROVISIONARR_TEST_FIXTURE_MONITOR_TRANSPORT', 'ARR_HOME_TEST_FIXTURE_MONITOR_TRANSPORT', 'false') === 'true';
+const TEST_FIXTURE_MONITOR_SEED = env('PROVISIONARR_TEST_FIXTURE_MONITOR_SEED', 'ARR_HOME_TEST_FIXTURE_MONITOR_SEED', '');
+const TEST_FIXTURE_MONITOR_MODE = env('PROVISIONARR_TEST_FIXTURE_MONITOR_MODE', 'ARR_HOME_TEST_FIXTURE_MONITOR_MODE', 'success');
+const TVMAZE_ENABLED = env('PROVISIONARR_TVMAZE_ENABLED', 'ARR_HOME_TVMAZE_ENABLED', 'false') === 'true';
+const TVMAZE_PAGE = Math.max(0, Math.min(1000, Number.parseInt(env('PROVISIONARR_TVMAZE_PAGE', 'ARR_HOME_TVMAZE_PAGE', '0'), 10) || 0));
+const TVMAZE_FIXTURE_MODE = env('PROVISIONARR_TVMAZE_FIXTURE_MODE', 'ARR_HOME_TVMAZE_FIXTURE_MODE', 'false') === 'true';
+const TVMAZE_FIXED_URL = 'https://api.tvmaze.com/shows';
+let tvmazeBackoffUntil = 0;
 const ORCHESTRATION_BACKUP_ROOT = env('PROVISIONARR_ORCHESTRATION_BACKUP_ROOT', 'ARR_HOME_ORCHESTRATION_BACKUP_ROOT', path.join(DATA_ROOT, 'orchestration-backups'));
 const ORCHESTRATION_CONNECTIONS_FILE = env('PROVISIONARR_ORCHESTRATION_CONNECTIONS_FILE', 'ARR_HOME_ORCHESTRATION_CONNECTIONS_FILE', path.join(DATA_ROOT, 'orchestration-connections.json'));
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -62,8 +73,20 @@ const requestAdmissionLocks = new Map();
 const orchestrationPlans = new Map();
 const bootstrapPlans = new Map();
 const prowlarrPlans = new Map();
+const adminCatalogPlans = new Map();
+function loadFixtureMonitorStore() {
+  if (!TEST_FIXTURE_MONITOR_TRANSPORT) return new Map();
+  let parsed;try{parsed=JSON.parse(TEST_FIXTURE_MONITOR_SEED||'{}');}catch{return new Map();}
+  const store=new Map();
+  for(const type of ['movie','series'])for(const item of (Array.isArray(parsed?.[type])?parsed[type]:[])){
+    const id=String(item?.id||'');if(/^[1-9]\d*$/.test(id))store.set(`${type}:${id}`,JSON.parse(JSON.stringify(item)));
+  }
+  return store;
+}
+const fixtureMonitorStore = loadFixtureMonitorStore();
+const fixtureMonitorReads = new Map();
 let orchestrationApplyLocked = false;
-const MAP_LIMITS = {sessions:5000, pendingActions:2000, mediaRefs:10000, rateLimits:10000, orchestrationPlans:200, bootstrapPlans:100, prowlarrPlans:100};
+const MAP_LIMITS = {sessions:5000, pendingActions:2000, mediaRefs:10000, rateLimits:10000, orchestrationPlans:200, bootstrapPlans:100, prowlarrPlans:100, adminCatalogPlans:200};
 
 const defaultSettings = {
   appName: 'Provisionarr', minFreeGb: MIN_FREE_GB, minFreePercent: MIN_FREE_PERCENT,
@@ -216,10 +239,33 @@ function embyApi(endpoint) {
   return new Promise((resolve,reject)=>{if(!EMBY_URL||!EMBY_API_KEY)return resolve({status:0,data:{}});const target=new url.URL(endpoint,EMBY_URL);const req=upstreamTransport(target,'Emby').request(target,{method:'GET',timeout:7000,headers:{'X-Emby-Token':EMBY_API_KEY,'accept':'application/json'}},r=>{collectUpstream(r,'Emby').then(data=>{let parsed={};try{parsed=data?JSON.parse(data):{}}catch{}resolve({status:r.statusCode||0,data:parsed});},reject);});req.on('timeout',()=>req.destroy(new Error('Emby timed out')));req.on('error',reject);req.end();});
 }
 async function embyUsers() { if(!EMBY_URL||!EMBY_API_KEY)return [];const response=await embyApi('/Users');if(response.status<200||response.status>=300)return [];return (Array.isArray(response.data)?response.data:[]).filter(user=>!user.Policy?.IsDisabled).map(user=>({id:String(user.Id),name:String(user.Name||'Emby user').slice(0,80)})); }
-function mapEmbyItem(item) { const isSeries=item.Type==='Series';return {id:item.Id,kind:isSeries?'series':'movie',service:isSeries?'TV':'Movies',serviceId:isSeries?'sonarr':'radarr',title:item.Name||'Untitled',year:item.ProductionYear||null,overview:item.Overview||'',poster:item.ImageTags?.Primary?`/api/images/emby/${encodeURIComponent(item.Id)}`:null,tmdbId:item.ProviderIds?.Tmdb||null,tvdbId:item.ProviderIds?.Tvdb||null,dateCreated:item.DateCreated||null,seasons:[]}; }
-async function collectEmbyLibrary() { if(!EMBY_URL||!EMBY_API_KEY)return {connected:false,items:[],message:'Emby is not configured.'};const endpoint='/Items?Recursive=true&IncludeItemTypes=Movie,Series&Fields=Overview,ProviderIds,DateCreated,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary&SortBy=SortName&SortOrder=Ascending';const response=await embyApi(endpoint);if(response.status<200||response.status>=300)throw new Error('Emby library is unavailable.');const rows=Array.isArray(response.data?.Items)?response.data.Items:[];return {connected:true,server:'Emby',items:rows.map(mapEmbyItem),total:rows.length}; }
-async function embyLibrary(refresh=false) { if(refresh)responseCache.delete('emby-library');return cachedAsync('emby-library',30000,collectEmbyLibrary); }
-async function embyInspiredRecommendations(limit=12,userId='') { if(!EMBY_URL||!EMBY_API_KEY)return [];const library=await embyLibrary();if(!library.items.length)return [];let seeds=[];if(userId){const history=await embyApi(`/Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Series&Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending&Limit=8&Fields=ProviderIds,Overview,ProductionYear,DateCreated`).catch(()=>({status:0,data:{}}));if(history.status>=200&&history.status<300)seeds=(history.data?.Items||[]).map(mapEmbyItem);}if(!seeds.length)seeds=[...library.items].sort(()=>Math.random()-.5).slice(0,4);const responses=await Promise.all(seeds.slice(0,4).map(seed=>embyApi(`/Items/${encodeURIComponent(seed.id)}/Similar?${userId?`UserId=${encodeURIComponent(userId)}&`:''}Limit=10&Fields=ProviderIds,Overview,ProductionYear` ).catch(()=>({status:0,data:{}}))));const ownedIds=new Set(library.items.map(x=>x.id)),ownedProviders=new Set(library.items.flatMap(x=>[x.tmdbId&&`tmdb:${x.tmdbId}`,x.tvdbId&&`tvdb:${x.tvdbId}`]).filter(Boolean));const candidates=[];for(const response of responses)for(const raw of (response.data?.Items||[])){const item=mapEmbyItem(raw),provider=item.tmdbId?`tmdb:${item.tmdbId}`:item.tvdbId?`tvdb:${item.tvdbId}`:null;if(ownedIds.has(item.id)||(provider&&ownedProviders.has(provider)))continue;if(item.kind==='movie'&&!item.tmdbId)continue;if(item.kind==='series'&&!item.tvdbId)continue;candidates.push(item);}return Array.from(new Map(candidates.map(x=>[`${x.serviceId}:${x.tvdbId||x.tmdbId||x.id}`,x])).values()).slice(0,limit); }
+function mapEmbyItem(item) { const isSeries=item.Type==='Series',mapped={id:item.Id,kind:isSeries?'series':'movie',service:isSeries?'TV':'Movies',serviceId:isSeries?'sonarr':'radarr',title:item.Name||'Untitled',year:item.ProductionYear||null,releaseDate:item.PremiereDate||null,rating:Number.isFinite(Number(item.CommunityRating))?Number(item.CommunityRating):null,overview:item.Overview||'',poster:item.ImageTags?.Primary?`/api/images/emby/${encodeURIComponent(item.Id)}`:null,tmdbId:item.ProviderIds?.Tmdb||null,tvdbId:item.ProviderIds?.Tvdb||null,dateCreated:item.DateCreated||null,seasons:[]};return {...mapped,identity:mediaIdentity(mapped)}; }
+async function collectEmbyLibrary(userId='') { if(!EMBY_URL||!EMBY_API_KEY)return {connected:false,items:[],message:'Emby is not configured.'};const userPath=userId?`/Users/${encodeURIComponent(userId)}/Items`:'/Items',endpoint=`${userPath}?Recursive=true&IncludeItemTypes=Movie,Series&Fields=Overview,ProviderIds,DateCreated,ProductionYear,PremiereDate,CommunityRating&ImageTypeLimit=1&EnableImageTypes=Primary&SortBy=SortName&SortOrder=Ascending`;const response=await embyApi(endpoint);if(response.status<200||response.status>=300)throw new Error('Emby library is unavailable.');const rows=Array.isArray(response.data?.Items)?response.data.Items:[];return {connected:true,server:'Emby',items:rows.map(mapEmbyItem),total:rows.length}; }
+async function embyLibrary(userId='',refresh=false) { const cacheKey=`emby-library:${userId||'shared'}`;if(refresh)responseCache.delete(cacheKey);return cachedAsync(cacheKey,30000,()=>collectEmbyLibrary(userId)); }
+async function libraryCatalog(options={}) { const settings=catalogOptions(options),library=await embyLibrary();if(!library.connected)return {...library,status:'unavailable',type:settings.type,sort:settings.sort,page:settings.page,pageSize:settings.pageSize,total:0,totalPages:0,hasMore:false,items:[]};const typed=settings.type?library.items.filter(item=>item.kind===settings.type):library.items;const page=pageRows(sortLibrary(typed,settings.sort),settings);return {...library,status:page.total?'ready':'empty',type:settings.type,sort:settings.sort,...page}; }
+function recommendationSeeds(history,library) { const seen=new Set(),seeds=[];for(const [items,prefix] of [[history,'Because you watched'],[library,'Because you have']])for(const item of items){const identity=item.identity||`${item.kind}:${item.id}`;if(seen.has(identity))continue;seen.add(identity);seeds.push({item,reason:`${prefix} ${item.title}`});}return seeds; }
+async function embyInspiredRecommendations(limit=12,userId='') {
+  if(!userId||!EMBY_URL||!EMBY_API_KEY)return {items:[],owned:new Set()};
+  const [library,historyResponse]=await Promise.all([
+    embyLibrary(userId),
+    embyApi(`/Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Series&Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending&Limit=8&Fields=ProviderIds,Overview,ProductionYear,PremiereDate,CommunityRating`).catch(()=>({status:0,data:{}}))
+  ]);
+  if(!library.connected)return {items:[],owned:new Set()};
+  const history=historyResponse.status>=200&&historyResponse.status<300?(historyResponse.data?.Items||[]).map(mapEmbyItem):[];
+  const owned=new Set(library.items.map(item=>item.identity).filter(Boolean));
+  const candidates=new Map();
+  for(const seed of recommendationSeeds(history,library.items).slice(0,8)){
+    const response=await embyApi(`/Items/${encodeURIComponent(seed.item.id)}/Similar?UserId=${encodeURIComponent(userId)}&Limit=10&Fields=ProviderIds,Overview,ProductionYear,PremiereDate,CommunityRating`).catch(()=>({status:0,data:{}}));
+    if(response.status<200||response.status>=300)continue;
+    for(const raw of (response.data?.Items||[])){
+      const item=mapEmbyItem(raw),identity=item.identity;
+      if(!identity||owned.has(identity))continue;
+      if((item.kind==='movie'&&!item.tmdbId)||(item.kind==='series'&&!item.tvdbId))continue;
+      if(!candidates.has(identity))candidates.set(identity,{...item,reason:seed.reason});
+    }
+  }
+  return {items:[...candidates.values()].slice(0,limit),owned};
+}
 function proxyEmbyImage(req,res,id) { if(!EMBY_URL||!EMBY_API_KEY)return json(res,404,{error:'Image unavailable'});const target=new url.URL(`/Items/${encodeURIComponent(id)}/Images/Primary?maxWidth=500&quality=88`,EMBY_URL);let transport;try{transport=upstreamTransport(target,'Emby')}catch{return json(res,502,{error:'Image unavailable'})}const upstream=transport.request(target,{method:'GET',timeout:7000,headers:{'X-Emby-Token':EMBY_API_KEY}},r=>{if((r.statusCode||0)<200||(r.statusCode||0)>=300){r.resume();return json(res,404,{error:'Image unavailable'});}const contentType=r.headers['content-type']||'image/jpeg';collectUpstreamBuffer(r,'Emby image').then(data=>{if(res.writableEnded)return;res.writeHead(200,{...securityHeaders,'content-type':contentType,'cache-control':'private, max-age=86400'});res.end(data);},()=>{if(!res.headersSent)json(res,404,{error:'Image unavailable'});});});upstream.on('timeout',()=>upstream.destroy());upstream.on('error',()=>{if(!res.headersSent)json(res,404,{error:'Image unavailable'});});upstream.end(); }
 function qbitRequest(endpoint, method='GET', form='', connection=qbitConnection, cookie=qbitCookie) {
   return new Promise((resolve, reject) => {
@@ -278,7 +324,20 @@ async function activity() {
 }
 function titleFrom(item) { return item.title || item.artistName || item.authorName || 'Untitled'; }
 function imageFrom(item) { return item.remotePoster || item.images?.find(i => i.coverType === 'poster')?.remoteUrl || item.remoteCover || null; }
-function mapMedia(item, service) { return {id: item.tvdbId || item.tmdbId || item.id, arrId: item.id, kind: service.type, service: service.label, serviceId: service.id, title: titleFrom(item), year: item.year || item.firstYear || null, overview: item.overview || 'Ready to request.', poster: imageFrom(item), tvdbId: item.tvdbId, tmdbId: item.tmdbId, seasons: item.seasons || []}; }
+function mediaType(item, service) { return service?.type === 'series' || item?.kind === 'series' || item?.serviceId === 'sonarr' ? 'series' : 'movie'; }
+function mediaIdentity(item, service) {
+  const type=mediaType(item,service),provider=type==='series'?item?.tvdbId:item?.tmdbId;
+  if(provider!==undefined&&provider!==null&&String(provider)!=='')return `${type}:${type==='series'?'tvdb':'tmdb'}:${provider}`;
+  if(type==='series'&&item?.tvmazeId!==undefined&&item?.tvmazeId!==null&&String(item.tvmazeId)!=='')return `series:tvmaze:${item.tvmazeId}`;
+  const arrId=item?.arrId||item?.id;
+  return arrId!==undefined&&arrId!==null&&String(arrId)!==''?`${type}:arr:${arrId}`:null;
+}
+function mapMedia(item, service) { const kind=mediaType(item,service);return {id: kind==='series'?(item.tvdbId||item.tvmazeId||item.id):(item.tmdbId||item.id), arrId: item.id, identity:mediaIdentity(item,service), kind, service: service.label, serviceId: service.id, title: titleFrom(item), year: item.year || item.firstYear || null, releaseDate: item.digitalRelease || item.physicalRelease || item.inCinemas || item.firstAired || null, rating:Number.isFinite(Number(item.ratings?.value||item.rating||item.communityRating))?Number(item.ratings?.value||item.rating||item.communityRating):null, overview: item.overview || 'Ready to request.', poster: imageFrom(item), tvdbId: item.tvdbId, tvmazeId: item.tvmazeId, tmdbId: item.tmdbId, seasons: item.seasons || []}; }
+function catalogOptions(query={}) { const type=['movie','series'].includes(query.type)?query.type:null,sort=['title','dateAdded','releaseYear','rating'].includes(query.sort)?query.sort:'title',page=Math.max(1,Math.min(10000,Number.parseInt(query.page,10)||1)),pageSize=Math.max(4,Math.min(48,Number.parseInt(query.pageSize,10)||24));return {type,sort,page,pageSize,includeUpcoming:query.upcoming==='1'||query.upcoming===true||query.includeUpcoming===true}; }
+function releaseState(item,now=Date.now()) { const value=Date.parse(item?.releaseDate||'');if(!Number.isFinite(value))return 'unknown';return value>now?'upcoming':'released'; }
+function releasedFirst(items,includeUpcoming=false) { return items.filter(item=>includeUpcoming||releaseState(item)!=='upcoming'); }
+function pageRows(items,{page,pageSize}) { const total=items.length,start=(page-1)*pageSize;return {items:items.slice(start,start+pageSize),page,pageSize,total,totalPages:Math.max(1,Math.ceil(total/pageSize)),hasMore:start+pageSize<total}; }
+function sortLibrary(items,sort) { const compareText=(a,b)=>String(a||'').localeCompare(String(b||''),undefined,{sensitivity:'base'}),date=value=>{const parsed=Date.parse(value||'');return Number.isFinite(parsed)?parsed:-Infinity};return [...items].sort((left,right)=>{if(sort==='dateAdded')return date(right.dateCreated)-date(left.dateCreated)||compareText(left.title,right.title);if(sort==='releaseYear')return Number(right.year||-Infinity)-Number(left.year||-Infinity)||compareText(left.title,right.title);if(sort==='rating')return Number(right.rating??-Infinity)-Number(left.rating??-Infinity)||compareText(left.title,right.title);return compareText(left.title,right.title);}); }
 
 const TITLE_ALIASES = new Map([
   ['southpark', 'south park']
@@ -821,39 +880,185 @@ async function requestHistory() {
   return result;
 }
 function requestStage(status) { const value=String(status||'waiting');return ({pending_approval:0,accepted:1,waiting:1,queued:2,downloading:3,importing:4,available:5,failed:-1,error:-1})[value]??1; }
-async function collectDiscover(user=null) {
-  const limit=Math.max(4,Math.min(24,Number(runtimeSettings.discoveryLimit)||12));
-  const s=services.radarr;
-  const embyUserId=String(user?.preferences?.embyUserId||'');
-  const [rawCandidates,library,inspired]=await Promise.all([api(s,'/api/v3/importlist/movie'),api(s,s.library),embyInspiredRecommendations(limit,embyUserId).catch(()=>[])]);
-  const owned=new Set((library.data||[]).map(x=>x.tmdbId));
-  const genreCounts={};for(const movie of (library.data||[]))for(const genre of (movie.genres||[]))genreCounts[genre]=(genreCounts[genre]||0)+1;
-  const rows=(Array.isArray(rawCandidates.data)?rawCandidates.data:[]).filter(x=>x.title&&!owned.has(x.tmdbId)&&!x.isExisting&&!x.isExcluded).map(x=>({raw:x,item:mapMedia(x,s),score:(x.genres||[]).reduce((n,g)=>n+(genreCounts[g]||0),0)+(x.isRecommendation?40:0)+(x.isTrending?20:0)+(x.isPopular?10:0)+Math.min(25,Number(x.popularity||0)/10)}));
-  const cards=items=>Array.from(new Map(items.map(x=>[`${x.serviceId}:${x.tvdbId||x.tmdbId||x.title}`,x])).values()).slice(0,limit).map(mediaCard);
-  const inspiredItems=[...inspired,...rows.sort((a,b)=>b.score-a.score).map(x=>x.item)];
-  const trending=rows.filter(x=>x.raw.isTrending).sort((a,b)=>Number(b.raw.popularity||0)-Number(a.raw.popularity||0)).map(x=>x.item);
-  const popular=rows.filter(x=>x.raw.isPopular).sort((a,b)=>Number(b.raw.popularity||0)-Number(a.raw.popularity||0)).map(x=>x.item);
-  const newReleases=[...rows].sort((a,b)=>Number(b.raw.year||0)-Number(a.raw.year||0)||Number(b.raw.popularity||0)-Number(a.raw.popularity||0)).map(x=>x.item);
-  return {personalized:Boolean(embyUserId),inspired:cards(inspiredItems),trending:cards(trending.length?trending:inspiredItems),popular:cards(popular.length?popular:inspiredItems),newReleases:cards(newReleases)};
+const RADARR_DISCOVERY_CANDIDATES = '/api/v3/importlist/movie?includeRecommendations=true&includeTrending=true&includePopular=true';
+const TV_DISCOVERY_UNAVAILABLE = 'TV discovery is unavailable because no supported TV discovery provider is configured. Sonarr is not used as a discovery-candidate provider.';
+const TVMAZE_ATTRIBUTION = 'Generic TV catalog data from TVmaze, licensed CC BY-SA.';
+function tvmazeUrl() {
+  const fixture=env('PROVISIONARR_TVMAZE_FIXTURE_URL', 'ARR_HOME_TVMAZE_FIXTURE_URL', '');
+  if(!TVMAZE_FIXTURE_MODE||!fixture)return new url.URL(TVMAZE_FIXED_URL);
+  const target=new url.URL(fixture);
+  if(!isLoopbackHost(target.hostname))throw new Error('TVmaze fixture URL must use loopback.');
+  return target;
 }
-async function discover(user=null,refresh=false) { const key=`discover:${user?.id||'anonymous'}:${user?.preferences?.embyUserId||'library'}`;if(refresh)responseCache.delete(key);return cachedAsync(key,60000,()=>collectDiscover(user)); }
-async function search(term) {
+function tvmazeRequest() {
+  return new Promise((resolve,reject)=>{
+    if(Date.now()<tvmazeBackoffUntil)return reject(Object.assign(new Error('TV catalog provider is backing off after rate limiting.'),{code:'TVMAZE_BACKOFF'}));
+    let target;try{target=tvmazeUrl();target.searchParams.set('page',String(TVMAZE_PAGE));}catch(error){return reject(error);}
+    const transport=target.protocol==='https:'?https:http;
+    const req=transport.request(target,{method:'GET',timeout:7000,headers:{accept:'application/json'}},response=>{
+      const retry=Math.max(60,Math.min(900,Number.parseInt(response.headers['retry-after'],10)||60))*1000;
+      if(response.statusCode===429){tvmazeBackoffUntil=Date.now()+retry;response.resume();return reject(Object.assign(new Error('TV catalog provider rate limited this generic request.'),{code:'TVMAZE_RATE_LIMITED'}));}
+      collectUpstream(response,'TVmaze').then(data=>{let parsed=[];try{parsed=JSON.parse(data)}catch{};if(response.statusCode<200||response.statusCode>=300||!Array.isArray(parsed))return reject(Object.assign(new Error('TV catalog provider is unavailable.'),{code:'TVMAZE_UNAVAILABLE'}));resolve(parsed);},reject);
+    });
+    req.on('timeout',()=>req.destroy(new Error('TV catalog provider timed out')));req.on('error',reject);req.end();
+  });
+}
+function tvmazeGenericPage() { return cachedAsync(`tvmaze-generic-page:${TVMAZE_PAGE}`,10*60*1000,()=>tvmazeRequest()); }
+function safeTvmazePoster(value) {
+  if(typeof value!=='string'||value.length>2048)return null;
+  let target;try{target=new url.URL(value);}catch{return null;}
+  return target.protocol==='https:'&&target.hostname==='static.tvmaze.com'&&!target.username&&!target.password&&!target.port&&!target.search&&!target.hash&&target.pathname.startsWith('/uploads/images/')?target.toString():null;
+}
+function tvmazeMedia(raw) {
+  const tvmazeId=Number(raw?.id),tvdbId=Number(raw?.externals?.thetvdb);
+  if(!Number.isInteger(tvmazeId)||tvmazeId<1||!Number.isInteger(tvdbId)||tvdbId<1||!String(raw?.name||'').trim())return null;
+  const item={id:tvmazeId,tvmazeId,tvdbId,kind:'series',service:'TV',serviceId:'sonarr',title:String(raw.name).trim().slice(0,240),year:Number.parseInt(String(raw.premiered||'').slice(0,4),10)||null,releaseDate:raw.premiered||null,rating:Number.isFinite(Number(raw.rating?.average))?Number(raw.rating.average):null,overview:String(raw.summary||'').replace(/<[^>]*>/g,'').trim().slice(0,2000),poster:safeTvmazePoster(raw.image?.medium),seasons:[]};
+  return {...item,identity:`series:tvmaze:${tvmazeId}`,identities:new Set([`series:tvmaze:${tvmazeId}`,`series:tvdb:${tvdbId}`]),reason:'Generic TV catalog'};
+}
+async function sonarrLookupValidTvdb(tvdbId) {
+  const response=await api(services.sonarr,`/api/v3/series/lookup?term=tvdb:${encodeURIComponent(tvdbId)}`);
+  return response.status>=200&&response.status<300&&Array.isArray(response.data)&&response.data.some(row=>Number(row?.tvdbId)===Number(tvdbId));
+}
+async function tvmazeDiscoverySource(options={}) {
+  if(!TVMAZE_ENABLED)return null;
+  const [generic,library]=await Promise.all([tvmazeGenericPage(),api(services.sonarr,services.sonarr.library)]);
+  if(library.status<200||library.status>=300)throw new Error('TV library validation is unavailable.');
+  const owned=new Set((Array.isArray(library.data)?library.data:[]).map(item=>mediaIdentity(item,services.sonarr)).filter(Boolean));
+  const candidates=(Array.isArray(generic)?generic:[]).map(tvmazeMedia).filter(Boolean).filter(item=>!([...item.identities].some(identity=>owned.has(identity)))&& (options.includeUpcoming||releaseState(item)!=='upcoming'));
+  const rows=[];
+  for(const item of candidates.slice(0,40))if(await sonarrLookupValidTvdb(item.tvdbId))rows.push({raw:{generic:true},item,score:Number(item.rating||0)});
+  return {service:services.sonarr,owned,rows,generic:true,attribution:TVMAZE_ATTRIBUTION};
+}
+async function movieDiscoverySource(options={}) {
+  const service=services.radarr;
+  const [candidates,library]=await Promise.all([api(service,RADARR_DISCOVERY_CANDIDATES),api(service,service.library)]);
+  if(candidates.status<200||candidates.status>=300||library.status<200||library.status>=300)throw new Error('Radarr movie discovery is unavailable.');
+  const owned=new Set((Array.isArray(library.data)?library.data:[]).map(item=>mediaIdentity(item,service)).filter(Boolean));
+  const genreCounts={};for(const item of (Array.isArray(library.data)?library.data:[]))for(const genre of (item.genres||[]))genreCounts[genre]=(genreCounts[genre]||0)+1;
+  const rows=(Array.isArray(candidates.data)?candidates.data:[]).filter(item=>item.title&&!item.isExisting&&!item.isExcluded).map(raw=>({raw,item:mapMedia(raw,service),score:(raw.genres||[]).reduce((total,genre)=>total+(genreCounts[genre]||0),0)+(raw.isRecommendation?40:0)+(raw.isTrending?20:0)+(raw.isPopular?10:0)+Math.min(25,Number(raw.popularity||0)/10)})).filter(row=>(options.includeUpcoming||releaseState(row.item)!=='upcoming')&&row.item.identity&&!owned.has(row.item.identity));
+  return {service,owned,rows};
+}
+function discoveryCards(items,seen,limit,reason) {
+  const selected=[];
+  for(const item of items){const key=item.identity;if(!key||seen.has(key))continue;seen.add(key);selected.push(mediaCard({...item,reason:item.reason||reason}));if(selected.length>=limit)break;}
+  return selected;
+}
+function unavailableDiscoveryCatalog(message) { return {status:'unavailable',message,rails:{inspired:[],trending:[],popular:[],newReleases:[]}}; }
+function discoveryCatalog(source,inspired,allOwned,limit,label) {
+  if(!source)return unavailableDiscoveryCatalog(`${label} recommendations are unavailable because the connected service could not be reached.`);
+  if(source.generic){const items=discoveryCards(source.rows.map(row=>row.item),new Set(),limit,'Generic TV catalog');return {status:items.length?'ready':'empty',message:items.length?'':'No validated, unowned TV candidates are available from the generic catalog right now.',generic:true,attribution:source.attribution,rails:{catalog:items,inspired:[],trending:[],popular:[],newReleases:[]}};}
+  const seen=new Set(),type=source.service.type;
+  const inspiredItems=inspired.filter(item=>mediaType(item)===type&&!allOwned.has(mediaIdentity(item))).map(item=>({...item,reason:item.reason||'Inspired by your library'}));
+  const ranked=[...source.rows].sort((a,b)=>b.score-a.score).map(row=>row.item);
+  const trending=source.rows.filter(row=>row.raw.isTrending).sort((a,b)=>Number(b.raw.popularity||0)-Number(a.raw.popularity||0)).map(row=>row.item);
+  const popular=source.rows.filter(row=>row.raw.isPopular).sort((a,b)=>Number(b.raw.popularity||0)-Number(a.raw.popularity||0)).map(row=>row.item);
+  const newReleases=[...source.rows].sort((a,b)=>Number(b.raw.year||0)-Number(a.raw.year||0)||Number(b.raw.popularity||0)-Number(a.raw.popularity||0)).map(row=>row.item);
+  const rails={
+    inspired:discoveryCards([...inspiredItems,...ranked],seen,limit,'Inspired by your library'),
+    trending:discoveryCards(trending,seen,limit,'Trending now'),
+    popular:discoveryCards(popular,seen,limit,'Popular with viewers'),
+    newReleases:discoveryCards(newReleases,seen,limit,'New release')
+  };
+  const count=Object.values(rails).reduce((total,items)=>total+items.length,0);
+  const serviceLabel=source.service.label;
+  return {status:count?'ready':'empty',message:count?'':`No unowned ${serviceLabel.toLowerCase()} recommendations are available right now.`,rails};
+}
+async function collectDiscover(user=null,options={}) {
+  const settings=catalogOptions(options),limit=Math.max(4,Math.min(24,Number(runtimeSettings.discoveryLimit)||12)),embyUserId=String(user?.preferences?.embyUserId||'');
+  const [movieResult,tvResult,inspired]=await Promise.allSettled([movieDiscoverySource(settings),tvmazeDiscoverySource(settings),embyInspiredRecommendations(limit,embyUserId)]);
+  const movies=movieResult.status==='fulfilled'?movieResult.value:null;
+  const tv=tvResult.status==='fulfilled'?tvResult.value:null;
+  const personal=inspired.status==='fulfilled'?inspired.value:{items:[],owned:new Set()};
+  const allOwned=new Set([...(movies?.owned||[]),...(tv?.owned||[]),...personal.owned]),recommendations=personal.items;
+  const movieCatalog=discoveryCatalog(movies,recommendations,allOwned,limit,'Movie'),tvCatalog=TVMAZE_ENABLED?discoveryCatalog(tv,recommendations,allOwned,limit,'TV'):unavailableDiscoveryCatalog(TV_DISCOVERY_UNAVAILABLE);
+  const flatten=rail=>[...movieCatalog.rails[rail],...tvCatalog.rails[rail]];
+  return {personalized:Boolean(embyUserId),type:settings.type,includeUpcoming:settings.includeUpcoming,movies:movieCatalog,tv:tvCatalog,inspired:flatten('inspired'),trending:flatten('trending'),popular:flatten('popular'),newReleases:flatten('newReleases')};
+}
+async function discover(user=null,options={},refresh=false) { const settings=catalogOptions(options),key=`discover:${user?.id||'anonymous'}:${user?.preferences?.embyUserId||'library'}:${settings.type||'all'}:${settings.includeUpcoming?'upcoming':'released'}`;if(refresh)responseCache.delete(key);return cachedAsync(key,60000,()=>collectDiscover(user,settings)); }
+async function search(term,options={}) {
   const parsed = typeof term === 'string' ? parseMediaQuery(term) : term;
-  const targets = parsed.mediaType ? Object.values(services).filter(s => s.type === parsed.mediaType) : [services.sonarr, services.radarr];
+  const settings=catalogOptions(options),selectedType=settings.type||parsed.mediaType;
+  const targets = selectedType ? Object.values(services).filter(s => s.type === selectedType) : [services.sonarr, services.radarr];
   const query = parsed.canonicalTitle || parsed.title || parsed.original;
   if (!query) return [];
   const rows = await Promise.all(targets.map(async s => {
     try {
-      const r = await api(s, `${s.search}?term=${encodeURIComponent(query)}`);
-      return (Array.isArray(r.data) ? r.data : []).slice(0, 40).map(x => mapMedia(x, s));
+      const [results,library] = await Promise.all([api(s, `${s.search}?term=${encodeURIComponent(query)}`),api(s,s.library)]);
+      if(results.status<200||results.status>=300||library.status<200||library.status>=300)return [];
+      const owned=new Set((Array.isArray(library.data)?library.data:[]).map(item=>mediaIdentity(item,s)).filter(Boolean));
+      return releasedFirst((Array.isArray(results.data) ? results.data : []).slice(0, 40).map(item => mapMedia(item, s)),settings.includeUpcoming).filter(item=>item.identity&&!owned.has(item.identity));
     } catch { return []; }
   }));
-  return rankMediaResults(rows.flat(), parsed).slice(0, 16).map(x => seasonDetails(x, parsed.seasonNumber));
+  return rankMediaResults(rows.flat(), parsed).slice(0, 100).map(x => seasonDetails(x, parsed.seasonNumber));
+}
+
+const ADMIN_CATALOG_TYPES=Object.freeze({movie:services.radarr,series:services.sonarr});
+const ADMIN_CATALOG_VIEWS=new Set(['missing','cutoff','calendar']);
+const RADARR_MINIMUM_AVAILABILITY=new Set(['announced','inCinemas','released','preDB']);
+function fixtureAdminGate() { if(!FIXTURE_ADMIN_CONTROLS)throw Object.assign(new Error('Fixture-only catalog administration is disabled on this instance.'),{statusCode:409,code:'FIXTURE_ADMIN_ONLY'});for(const service of [services.sonarr,services.radarr]){let target;try{target=new url.URL(service.url)}catch{throw Object.assign(new Error('Fixture-only catalog administration requires valid loopback services.'),{statusCode:409,code:'FIXTURE_ADMIN_LOOPBACK_ONLY'});}if(!isLoopbackHost(target.hostname))throw Object.assign(new Error('Fixture-only catalog administration requires loopback Sonarr and Radarr targets.'),{statusCode:409,code:'FIXTURE_ADMIN_LOOPBACK_ONLY'});} }
+function fixtureMonitorGate() { if(!FIXTURE_ADMIN_CONTROLS||!TEST_FIXTURE_MONITOR_TRANSPORT)throw Object.assign(new Error('Fixture-only monitor execution is disabled on this instance.'),{statusCode:409,code:'FIXTURE_ADMIN_ONLY'});if(!fixtureMonitorStore.size)throw Object.assign(new Error('The in-memory fixture monitor transport is unavailable.'),{statusCode:409,code:'FIXTURE_MONITOR_TRANSPORT_UNAVAILABLE'}); }
+function fixtureMonitorRead(type,id) {
+  const key=`${type}:${id}`,item=fixtureMonitorStore.get(key);if(!item)throw Object.assign(new Error('The fixture catalog item could not be read back.'),{statusCode:404,code:'CATALOG_ITEM_UNAVAILABLE'});
+  const reads=(fixtureMonitorReads.get(key)||0)+1;fixtureMonitorReads.set(key,reads);
+  if(TEST_FIXTURE_MONITOR_MODE==='stale-on-confirm'&&reads===2)item.title=`${item.title} changed`;
+  return JSON.parse(JSON.stringify(item));
+}
+function fixtureMonitorWrite(type,id,monitored) {
+  const key=`${type}:${id}`,item=fixtureMonitorStore.get(key);if(!item)throw Object.assign(new Error('The fixture catalog item could not be read back.'),{statusCode:404,code:'CATALOG_ITEM_UNAVAILABLE'});
+  if(TEST_FIXTURE_MONITOR_MODE==='put-fail')throw Object.assign(new Error('The fixture monitoring update failed.'),{code:'FIXTURE_MONITOR_WRITE_FAILED'});
+  item.monitored=monitored;
+  if(TEST_FIXTURE_MONITOR_MODE==='readback-mismatch')item.monitored=!monitored;
+  return JSON.parse(JSON.stringify(item));
+}
+function adminCatalogService(type) { const service=ADMIN_CATALOG_TYPES[String(type||'')];if(!service)throw Object.assign(new Error('Choose Movies or TV.'),{statusCode:400,code:'CATALOG_TYPE_INVALID'});return service; }
+function adminItemId(value) { const id=String(value||'');if(!/^[1-9]\d*$/.test(id))throw Object.assign(new Error('The catalog item identifier is invalid.'),{statusCode:400,code:'CATALOG_ITEM_INVALID'});return id; }
+function safeAdminItem(item,service) { return {id:Number(item?.id)||null,title:orchestrationString(titleFrom(item),'Untitled',160),type:service.type,monitored:item?.monitored===true,qualityProfileId:orchestrationNumber(item?.qualityProfileId),rootFolderPath:orchestrationString(item?.rootFolderPath,'',1024)||null,tags:Array.isArray(item?.tags)?item.tags.filter(Number.isInteger):[],minimumAvailability:service.id==='radarr'?orchestrationString(item?.minimumAvailability,'',40)||null:null,seasons:service.type==='series'?(Array.isArray(item?.seasons)?item.seasons.map(season=>({seasonNumber:orchestrationNumber(season?.seasonNumber),monitored:season?.monitored===true})).filter(season=>season.seasonNumber!==null):[]):undefined}; }
+function safeAdminRows(data,service,view) { const rows=Array.isArray(data)?data:data?.records||[];return rows.slice(0,200).map(item=>({id:orchestrationNumber(item?.id)||orchestrationNumber(item?.seriesId)||orchestrationNumber(item?.movieId),title:orchestrationString(item?.title||item?.series?.title||item?.movie?.title,'Untitled',160),type:service.type,monitored:item?.monitored===true,airDateUtc:orchestrationString(item?.airDateUtc||item?.physicalRelease||item?.digitalRelease||item?.inCinemas||'',40)||null,view})); }
+function catalogViewPath(service,view) { if(view==='calendar'){const start=new Date(),end=new Date(Date.now()+31*24*60*60*1000);return `/api/v3/calendar?start=${start.toISOString().slice(0,10)}&end=${end.toISOString().slice(0,10)}`;}return `/api/v3/wanted/${view}?page=1&pageSize=200`; }
+async function adminCatalogSnapshot(type,view) {
+  fixtureAdminGate();const service=adminCatalogService(type);if(!ADMIN_CATALOG_VIEWS.has(view))throw Object.assign(new Error('Choose missing, cutoff, or calendar.'),{statusCode:400,code:'CATALOG_VIEW_INVALID'});
+  const [rows,profiles,roots,tags]=await Promise.all([api(service,catalogViewPath(service,view)),api(service,'/api/v3/qualityprofile'),api(service,'/api/v3/rootfolder'),api(service,'/api/v3/tag')]);
+  if(rows.status<200||rows.status>=300)throw Object.assign(new Error(`${service.label} ${view} view is unavailable.`),{statusCode:502,code:'CATALOG_VIEW_UNAVAILABLE'});
+  return {type:service.type,view,items:safeAdminRows(rows.data,service,view),choices:{qualityProfiles:profiles.status>=200&&profiles.status<300?(profiles.data||[]).map(profile=>({id:orchestrationNumber(profile?.id),name:orchestrationString(profile?.name,'Unnamed profile',120)})).filter(profile=>profile.id!==null):[],rootFolders:roots.status>=200&&roots.status<300?(roots.data||[]).map(root=>({id:orchestrationNumber(root?.id),path:orchestrationString(root?.path,'',1024),accessible:root?.accessible!==false})).filter(root=>root.id!==null&&root.path):[],tags:tags.status>=200&&tags.status<300?(tags.data||[]).map(tag=>({id:orchestrationNumber(tag?.id),label:orchestrationString(tag?.label,'',120)})).filter(tag=>tag.id!==null&&tag.label):[]}};
+}
+function exactKeys(body,allowed) { if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!allowed.has(key)))throw Object.assign(new Error('Catalog preview contains unsupported fields.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'}); }
+function stableCatalogValue(value) { if(Array.isArray(value))return value.map(stableCatalogValue);if(value&&typeof value==='object')return Object.keys(value).sort().reduce((result,key)=>{result[key]=stableCatalogValue(value[key]);return result;},{});return value; }
+function catalogRevision(item) { return crypto.createHash('sha256').update(JSON.stringify(stableCatalogValue(item))).digest('hex'); }
+async function readAdminCatalogItem(service,id) { const response=await api(service,`/api/v3/${service.type}/${encodeURIComponent(id)}`);if(response.status<200||response.status>=300||!response.data||String(response.data.id)!==String(id))throw Object.assign(new Error('The catalog item could not be read back.'),{statusCode:404,code:'CATALOG_ITEM_UNAVAILABLE'});return JSON.parse(JSON.stringify(response.data)); }
+function monitorPlanPublic(plan) { return {id:plan.id,type:plan.type,action:'monitor',itemId:plan.itemId,before:plan.before,after:plan.after,revision:plan.revision,createdAt:plan.createdAt,expiresAt:plan.expiresAt,writesEnabled:true,fixtureOnly:true}; }
+async function previewFixtureMonitor(body,session) {
+  fixtureMonitorGate();exactKeys(body,new Set(['type','itemId','monitored']));if(typeof body.monitored!=='boolean')throw Object.assign(new Error('Monitoring must be true or false.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});
+  const service=adminCatalogService(body.type),id=adminItemId(body.itemId),rawBefore=fixtureMonitorRead(service.type,id),before=safeAdminItem(rawBefore,service),after={...before,seasons:before.seasons?[...before.seasons]:undefined,tags:[...before.tags],monitored:body.monitored},now=Date.now();
+  const plan={id:crypto.randomUUID(),type:service.type,action:'monitor',fixtureMonitorExecution:true,itemId:id,before,after,revision:catalogRevision(rawBefore),createdAt:new Date(now).toISOString(),expiresAt:new Date(now+2*60*1000).toISOString(),userId:session.user.id,expires:now+2*60*1000,used:false};setBounded(adminCatalogPlans,plan.id,plan,MAP_LIMITS.adminCatalogPlans);return monitorPlanPublic(plan);
+}
+async function confirmFixtureMonitor(body,session,req) {
+  fixtureMonitorGate();exactKeys(body,new Set(['planId']));const plan=adminCatalogPlans.get(String(body.planId||''));
+  if(!plan||plan.action!=='monitor'||plan.fixtureMonitorExecution!==true||plan.expires<Date.now()||plan.userId!==session.user.id||plan.used)throw Object.assign(new Error('The monitor confirmation expired. Review the item again.'),{statusCode:409,code:'CATALOG_PLAN_EXPIRED'});
+  plan.used=true;const service=adminCatalogService(plan.type);let current;
+  try{current=fixtureMonitorRead(service.type,plan.itemId);}catch(error){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_READBACK_FAILED'});throw error;}
+  if(catalogRevision(current)!==plan.revision){audit(req,'admin_catalog_monitor_fixture_stale',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_STALE'});throw Object.assign(new Error('The catalog item changed after preview. No fixture write was made.'),{statusCode:409,code:'CATALOG_PLAN_STALE'});}
+  try{fixtureMonitorWrite(service.type,plan.itemId,plan.after.monitored);}catch(error){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_PUT_FAILED'});throw Object.assign(new Error('The fixture monitoring update failed. No success was reported.'),{statusCode:502,code:'CATALOG_MONITOR_PUT_FAILED'});}
+  const finalState=safeAdminItem(fixtureMonitorRead(service.type,plan.itemId),service);if(JSON.stringify(stableCatalogValue(finalState))!==JSON.stringify(stableCatalogValue(plan.after))){audit(req,'admin_catalog_monitor_fixture_failed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_READBACK_MISMATCH'});throw Object.assign(new Error('Fixture read-back did not match the reviewed monitoring state.'),{statusCode:502,code:'CATALOG_MONITOR_READBACK_MISMATCH'});}
+  audit(req,'admin_catalog_monitor_fixture_executed',{userId:session.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_EXECUTED'});return {ok:true,outcome:'FIXTURE_EXECUTED',item:finalState};
+}
+async function previewAdminCatalogChange(body,session) {
+  fixtureAdminGate();exactKeys(body,new Set(['type','action','itemId','monitored','seasonNumber','qualityProfileId','rootFolderPath','tagIds','minimumAvailability']));
+  const service=adminCatalogService(body.type),id=adminItemId(body.itemId),action=String(body.action||'');
+  const itemResponse=await api(service,`/api/v3/${service.type}/${encodeURIComponent(id)}`);if(itemResponse.status<200||itemResponse.status>=300)throw Object.assign(new Error('The catalog item could not be read back.'),{statusCode:404,code:'CATALOG_ITEM_UNAVAILABLE'});
+  const before=safeAdminItem(itemResponse.data,service),after={...before,seasons:before.seasons?[...before.seasons]:undefined,tags:[...before.tags]};
+  if(action==='monitor')throw Object.assign(new Error('Use the fixture monitor preview route for item monitoring.'),{statusCode:400,code:'CATALOG_MONITOR_ROUTE_REQUIRED'});
+  else if(action==='season'){if(service.type!=='series'||!Number.isInteger(body.seasonNumber)||body.seasonNumber<0||typeof body.monitored!=='boolean'||!before.seasons.some(season=>season.seasonNumber===body.seasonNumber))throw Object.assign(new Error('TV season controls require a listed season and monitoring choice.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});after.seasons=seasonList(before.seasons,body.seasonNumber, true).map(season=>Number(season.seasonNumber)===body.seasonNumber?{...season,monitored:body.monitored}:season);}
+  else if(action==='qualityProfile'){const profiles=await api(service,'/api/v3/qualityprofile'),profileId=orchestrationNumber(body.qualityProfileId);if(!Number.isInteger(profileId)||!Array.isArray(profiles.data)||!profiles.data.some(profile=>Number(profile.id)===profileId))throw Object.assign(new Error('Choose a listed quality profile.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});after.qualityProfileId=profileId;}
+  else if(action==='rootFolder'){const roots=await api(service,'/api/v3/rootfolder'),path=String(body.rootFolderPath||'');if(!Array.isArray(roots.data)||!roots.data.some(root=>root.accessible!==false&&root.path===path))throw Object.assign(new Error('Choose an accessible listed root folder.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});after.rootFolderPath=path;}
+  else if(action==='tags'){const tags=await api(service,'/api/v3/tag'),tagIds=Array.isArray(body.tagIds)?[...new Set(body.tagIds)]:[];if(tagIds.some(value=>!Number.isInteger(value))||!Array.isArray(tags.data)||tagIds.some(value=>!tags.data.some(tag=>Number(tag.id)===value)))throw Object.assign(new Error('Choose only listed tags.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});after.tags=tagIds;}
+  else if(action==='minimumAvailability'){const value=String(body.minimumAvailability||'');if(service.type!=='movie'||!RADARR_MINIMUM_AVAILABILITY.has(value))throw Object.assign(new Error('Choose a supported Radarr minimum-availability value.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});after.minimumAvailability=value;}
+  else throw Object.assign(new Error('Choose a supported catalog action.'),{statusCode:400,code:'CATALOG_PREVIEW_INVALID'});
+  const plan={id:crypto.randomUUID(),type:service.type,action,itemId:id,before,after,createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+10*60*1000).toISOString(),writesEnabled:false};setBounded(adminCatalogPlans,plan.id,{...plan,userId:session.user.id,expires:Date.now()+10*60*1000,used:false},MAP_LIMITS.adminCatalogPlans);return plan;
 }
 function mediaCard(item) {
   const mediaRef=crypto.randomBytes(18).toString('base64url');
   setBounded(mediaRefs,mediaRef,{item,expires:Date.now()+15*60*1000},MAP_LIMITS.mediaRefs);
-  return {kind:'media',mediaRef,title:item.title,year:item.year,mediaType:item.kind==='movie'?'movie':'series',service:item.serviceId,poster:item.poster,overview:item.overview,availability:item.arrId?'library_or_monitored':'can_request',seasonNumber:item.seasonNumber||null,seasonTitle:item.seasonTitle||null,actions:['view','propose_request']};
+  return {kind:'media',mediaRef,title:item.title,year:item.year,releaseDate:item.releaseDate||null,mediaType:item.kind==='movie'?'movie':'series',service:item.serviceId,identity:item.identity||null,tvdbId:item.tvdbId||null,tvmazeId:item.tvmazeId||null,poster:item.poster,overview:item.overview,reason:item.reason||'',availability:item.arrId?'library_or_monitored':'can_request',seasonNumber:item.seasonNumber||null,seasonTitle:item.seasonTitle||null,actions:['view','propose_request']};
 }
 function proposalFor(req,mediaRef,userId) { const ref=mediaRefs.get(mediaRef); if(!ref||ref.expires<Date.now())throw new Error('That result expired. Search again.'); const id=crypto.randomBytes(24).toString('base64url'); const proposal={id,type:'media_request',item:ref.item,userId,expires:Date.now()+5*60*1000,used:false}; setBounded(pendingActions,id,proposal,MAP_LIMITS.pendingActions); return {id,type:proposal.type,title:proposal.item.title,year:proposal.item.year,mediaType:proposal.item.kind==='movie'?'movie':'series',service:proposal.item.serviceId,seasonNumber:proposal.item.seasonNumber||null,seasonTitle:proposal.item.seasonTitle||null,confirmationRequired:true,expiresAt:new Date(proposal.expires).toISOString()}; }
 async function rejectionProposal(downloadId,userId) { const snap=await downloadSnapshot(),item=snap.rows.find(x=>x.id===downloadId); if(!item)throw new Error('That queue item no longer exists.'); if(!item.canRejectThroughArr)throw new Error('Only releases owned by Sonarr or Radarr can be rejected here.'); if(!item.unsafeRejected&&!['failed','error'].includes(String(item.state))&&item.trackedStatus!=='error')throw new Error('This action is only offered for rejected or failed releases.'); const id=crypto.randomBytes(24).toString('base64url'),proposal={id,type:'reject_release',downloadId:item.id,item:{title:item.title,serviceId:item.serviceId,arrId:item.arrId,hash:item.hash,unsafeRejected:item.unsafeRejected},userId,expires:Date.now()+5*60*1000,used:false};setBounded(pendingActions,id,proposal,MAP_LIMITS.pendingActions);return {id,type:proposal.type,title:item.title,service:item.serviceId,unsafeRejected:item.unsafeRejected,confirmationRequired:true,warning:'Sonarr or Radarr will remove this release from the download client, delete its files, blocklist it, and search for a replacement.',expiresAt:new Date(proposal.expires).toISOString()}; }
@@ -962,7 +1167,12 @@ async function route(req,res,pathname,query) {
   if(pathname==='/api/admin/setup'&&req.method==='POST'){if(loadUsers().some(x=>x.role==='owner'))return json(res,409,{error:'Owner account is already configured.'});if(limited(req,'owner-setup',5,15*60*1000))return json(res,429,{error:'Too many setup attempts.'});const body=await readBody(req),provided=String(body.setupToken||''),expected=OWNER_SETUP_TOKEN;const ok=provided.length===expected.length&&crypto.timingSafeEqual(Buffer.from(provided),Buffer.from(expected));if(!ok)return json(res,403,{error:'Setup token is incorrect.'});if(String(body.password||'').length<10)return json(res,400,{error:'Use at least 10 characters.'});const username=String(body.username||'owner').toLowerCase().replace(/[^a-z0-9._-]/g,'').slice(0,32)||'owner',record=passwordHash(String(body.password)),owner={id:crypto.randomUUID(),username,displayName:String(body.displayName||'Owner').slice(0,60),email:String(body.email||'').slice(0,160),role:'owner',...record,createdAt:new Date().toISOString(),preferences:{}};saveUsers([owner]);atomicWriteJson(ADMIN_FILE,record);try{fs.unlinkSync(SETUP_TOKEN_FILE)}catch{}const session=newSession(res,owner);audit(req,'owner_setup',{userId:owner.id});return json(res,201,{ok:true,user:safeUser(owner),csrf:session.csrf},{'set-cookie':session.cookie});}
   if((pathname==='/api/auth/login'||pathname==='/api/admin/login')&&req.method==='POST'){if(limited(req,'login',8,15*60*1000))return json(res,429,{error:'Too many login attempts. Try again later.'});const body=await readBody(req),username=String(body.username||'owner').toLowerCase();if(limitedKey(`account:login:${username}`,12,15*60*1000))return json(res,429,{error:'Too many login attempts. Try again later.'});const user=loadUsers().find(x=>x.username.toLowerCase()===username);if(!user||!passwordValid(String(body.password||''),user)){audit(req,'login_failed',{username});return json(res,401,{error:'Username or password is incorrect.'});}const session=newSession(res,user);audit(req,'login',{userId:user.id});return json(res,200,{ok:true,user:safeUser(user),csrf:session.csrf},{'set-cookie':session.cookie});}
   if((pathname==='/api/auth/logout'||pathname==='/api/admin/logout')&&req.method==='POST'){const s=requireUser(req,res,true);if(!s)return;sessions.delete(s.key);saveSessions();audit(req,'logout',{userId:s.user.id});return json(res,200,{ok:true},{'set-cookie':sessionCookie('',0)});}
-  if(pathname==='/api/admin/settings'&&req.method==='GET'){if(!requireAdmin(req,res))return;const [tv,movies,mediaUsers]=await Promise.all([api(services.sonarr,'/api/v3/qualityprofile'),api(services.radarr,'/api/v3/qualityprofile'),embyUsers().catch(()=>[])]);return json(res,200,{settings:publicSettings(),profiles:{tv:(tv.data||[]).map(x=>({id:x.id,name:x.name})),movies:(movies.data||[]).map(x=>({id:x.id,name:x.name}))},embyUsers:mediaUsers});}
+  if(pathname==='/api/admin/catalog'&&req.method==='GET'){const s=requireAdmin(req,res);if(!s)return;const payload=await adminCatalogSnapshot(query.type,query.view);audit(req,'admin_catalog_read',{userId:s.user.id,type:payload.type,view:payload.view,count:payload.items.length});return json(res,200,payload);}
+  if(pathname==='/api/admin/catalog/preview'&&req.method==='POST'){const s=requireAdmin(req,res,true);if(!s)return;const plan=await previewAdminCatalogChange(await readBody(req),s);audit(req,'admin_catalog_preview',{userId:s.user.id,type:plan.type,action:plan.action,itemId:plan.itemId});return json(res,200,{plan});}
+  if(pathname==='/api/admin/catalog/confirm'&&req.method==='POST'){const s=requireAdmin(req,res,true);if(!s)return;fixtureAdminGate();const body=await readBody(req),plan=adminCatalogPlans.get(String(body.planId||''));if(!plan||plan.expires<Date.now()||plan.userId!==s.user.id||plan.used)return json(res,409,{error:'The catalog preview expired. Review the item again.',code:'CATALOG_PLAN_EXPIRED'});audit(req,'admin_catalog_confirmation_blocked',{userId:s.user.id,type:plan.type,action:plan.action,itemId:plan.itemId});return json(res,409,{error:'Catalog changes are preview-only. No upstream write was made.',code:'CATALOG_WRITES_LOCKED',plan:{id:plan.id,before:plan.before,after:plan.after}});}
+  if(pathname==='/api/admin/catalog/monitor/preview'&&req.method==='POST'){const s=requireAdmin(req,res,true);if(!s)return;const plan=await previewFixtureMonitor(await readBody(req),s);audit(req,'admin_catalog_monitor_fixture_preview',{userId:s.user.id,type:plan.type,itemId:plan.itemId,outcome:'FIXTURE_PREVIEW'});return json(res,200,{plan});}
+  if(pathname==='/api/admin/catalog/monitor/confirm'&&req.method==='POST'){const s=requireAdmin(req,res,true);if(!s)return;return json(res,200,await confirmFixtureMonitor(await readBody(req),s,req));}
+  if(pathname==='/api/admin/settings'&&req.method==='GET'){if(!requireAdmin(req,res))return;const [tv,movies,mediaUsers]=await Promise.all([api(services.sonarr,'/api/v3/qualityprofile').catch(()=>({data:[]})),api(services.radarr,'/api/v3/qualityprofile').catch(()=>({data:[]})),embyUsers().catch(()=>[])]);return json(res,200,{settings:publicSettings(),profiles:{tv:(tv.data||[]).map(x=>({id:x.id,name:x.name})),movies:(movies.data||[]).map(x=>({id:x.id,name:x.name}))},embyUsers:mediaUsers});}
   if(pathname==='/api/admin/settings'&&req.method==='PUT'){if(!requireAdmin(req,res,true))return;const body=await readBody(req),allowed=['appName','minFreeGb','minFreePercent','movieQualityProfileId','tvQualityProfileId','autoSearch','allowUserRefetch','userAutoApprove','userActiveRequestLimit','pauseRequestsWhenStorageLow','discoveryLimit','notificationsEnabled','notifyAvailable','notifyFailed','notifyDiskLow','smtpHost','smtpPort','smtpSecure','smtpUser','smtpPass','smtpFrom'];const next={...runtimeSettings};for(const key of allowed)if(Object.prototype.hasOwnProperty.call(body,key)&&!(key==='smtpPass'&&body[key]===''))next[key]=body[key];next.appName=String(next.appName||'Provisionarr').slice(0,40);next.minFreeGb=Math.max(1,Math.min(5000,Number(next.minFreeGb)||50));next.minFreePercent=Math.max(1,Math.min(95,Number(next.minFreePercent)||15));next.userActiveRequestLimit=Math.max(1,Math.min(20,Number(next.userActiveRequestLimit)||3));next.discoveryLimit=Math.max(4,Math.min(24,Number(next.discoveryLimit)||12));next.smtpHost=String(next.smtpHost||'').slice(0,253);next.smtpPort=Math.max(1,Math.min(65535,Number(next.smtpPort)||587));next.smtpUser=String(next.smtpUser||'').slice(0,253);next.smtpPass=String(next.smtpPass||'').slice(0,1024);next.smtpFrom=String(next.smtpFrom||'').slice(0,253);saveSettings(next);audit(req,'settings_updated',{fields:Object.keys(body).filter(key=>allowed.includes(key)&&key!=='smtpPass')});return json(res,200,{ok:true,settings:publicSettings()});}
   if(pathname==='/api/admin/orchestration/inventory'&&req.method==='GET'){if(!requireAdmin(req,res))return;return json(res,200,await orchestrationInventory());}
   if(pathname==='/api/admin/orchestration/mode'&&req.method==='PUT'){const s=requireAdmin(req,res,true);if(!s)return;const body=await readBody(req,1024),mode=String(body.mode||'');if(!['existing','managed'].includes(mode))return json(res,400,{error:'Choose an existing stack or a managed stack.'});saveSettings({...runtimeSettings,setupMode:mode});audit(req,'orchestration_mode_selected',{userId:s.user.id,mode});return json(res,200,{ok:true,mode});}
@@ -988,9 +1198,9 @@ async function route(req,res,pathname,query) {
   if(/^\/api\/admin\/requests\/[^/]+\/approve$/.test(pathname)&&req.method==='POST'){const s=requireAdmin(req,res,true);if(!s)return;const id=pathname.split('/')[4],records=loadRequests(),pending=records.find(x=>x.id===id&&x.status==='pending_approval');if(!pending||!pending.requestItem)return json(res,404,{error:'Pending request not found.'});const requester=loadUsers().find(x=>x.id===pending.requestedBy)||s.user;const result=await createRequest(pending.requestItem,requester,id);writeRequests(loadRequests().filter(x=>x.id!==id));audit(req,'pending_request_approved',{requestId:id,title:pending.title,userId:requester.id});return json(res,200,result);}
   if(pathname==='/api/account'&&req.method==='PUT'){const s=requireUser(req,res,true);if(!s)return;const body=await readBody(req,400*1024),users=loadUsers(),user=users.find(x=>x.id===s.user.id),preferences=body.preferences&&typeof body.preferences==='object'?body.preferences:{};user.displayName=String(body.displayName??user.displayName).slice(0,60);user.email=String(body.email??user.email??'').slice(0,160);user.avatar=sanitizeAvatar(body.avatar,user.avatar||'');user.preferences={...(user.preferences||{}),notifications:preferences.notifications!==false};saveUsers(users);audit(req,'account_updated',{userId:user.id});return json(res,200,{user:safeUser(user)});}
   if((pathname==='/api/account/password'||pathname==='/api/admin/password')&&req.method==='PUT'){const s=requireUser(req,res,true);if(!s)return;const body=await readBody(req),users=loadUsers(),user=users.find(x=>x.id===s.user.id);if(!passwordValid(String(body.currentPassword||''),user))return json(res,403,{error:'Current password is incorrect.'});if(String(body.newPassword||'').length<10)return json(res,400,{error:'Use at least 10 characters.'});Object.assign(user,passwordHash(String(body.newPassword)));saveUsers(users);if(user.role==='owner')atomicWriteJson(ADMIN_FILE,{salt:user.salt,hash:user.hash});for(const [key,session] of sessions)if(session.userId===user.id)sessions.delete(key);saveSessions();audit(req,'password_changed',{userId:user.id});return json(res,200,{ok:true},{'set-cookie':sessionCookie('',0)});}
-  if(pathname==='/api/discover'&&req.method==='GET'){const s=requireUser(req,res);if(!s)return;return json(res,200,await discover(s.user));}
-  if(pathname==='/api/search'&&req.method==='GET'){if(!requireUser(req,res))return;return json(res,200,{results:query.q?(await search(query.q.trim().slice(0,200))).map(mediaCard):[]});}
-  if(pathname==='/api/library'&&req.method==='GET'){if(!requireUser(req,res))return;return json(res,200,await embyLibrary());}
+  if(pathname==='/api/discover'&&req.method==='GET'){const s=requireUser(req,res);if(!s)return;return json(res,200,await discover(s.user,query));}
+  if(pathname==='/api/search'&&req.method==='GET'){if(!requireUser(req,res))return;const settings=catalogOptions(query),rows=query.q?await search(query.q.trim().slice(0,200),settings):[],page=pageRows(rows,settings);return json(res,200,{...settings,...page,results:page.items.map(mediaCard)});}
+  if(pathname==='/api/library'&&req.method==='GET'){if(!requireUser(req,res))return;return json(res,200,await libraryCatalog(query));}
   if(/^\/api\/images\/emby\/[^/]+$/.test(pathname)&&req.method==='GET'){if(!requireUser(req,res))return;return proxyEmbyImage(req,res,decodeURIComponent(pathname.split('/').pop()));}
   if(pathname==='/api/downloads' && req.method==='GET'){if(!requireAdmin(req,res))return;return json(res,200,publicDownloads(await downloadSnapshot()));}
   if(pathname.startsWith('/api/downloads/') && req.method==='POST') { const parts=pathname.split('/').filter(Boolean),s=requireAdmin(req,res,true);if(!s)return;if(parts[3]!=='recheck')return json(res,400,{error:'This action requires a fresh confirmation.'});const result=await downloadAction(parts[2],parts[3]);audit(req,`download_${parts[3]}`,{id:parts[2],userId:s.user.id});return json(res,200,result); }
