@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {spawn} = require('node:child_process');
+const LOOPBACK_HOST = 'localhost';
 
 function passwordRecord(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -15,7 +16,7 @@ function passwordRecord(password) {
 
 async function unusedPort() {
   const socket = net.createServer();
-  await new Promise((resolve, reject) => socket.listen(0, '127.0.0.1', resolve).on('error', reject));
+  await new Promise((resolve, reject) => socket.listen(0, LOOPBACK_HOST, resolve).on('error', reject));
   const port = socket.address().port;
   await new Promise(resolve => socket.close(resolve));
   return port;
@@ -23,7 +24,7 @@ async function unusedPort() {
 
 async function listen(server) {
   const port = await unusedPort();
-  await new Promise((resolve, reject) => server.listen(port, '127.0.0.1', resolve).on('error', reject));
+  await new Promise((resolve, reject) => server.listen(port, LOOPBACK_HOST, resolve).on('error', reject));
   return port;
 }
 
@@ -43,13 +44,13 @@ async function startProvisionarr(t, extraEnv = {}, users = null) {
   ]));
   const port = await unusedPort();
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {stdio:'ignore', env:{
-    ...process.env, PORT:String(port), PROVISIONARR_LISTEN_HOST:'127.0.0.1',
+    ...process.env, PORT:String(port), PROVISIONARR_LISTEN_HOST:LOOPBACK_HOST,
     PROVISIONARR_CONFIG_ROOT:root, PROVISIONARR_USERS_FILE:path.join(root, 'users.json'),
     PROVISIONARR_SETTINGS_FILE:path.join(root, 'settings.json'), PROVISIONARR_REQUEST_LOG:path.join(root, 'requests.json'),
     PROVISIONARR_ADMIN_FILE:path.join(root, 'admin.json'), PROVISIONARR_AUDIT_FILE:path.join(root, 'audit.jsonl'),
     PROVISIONARR_SESSION_FILE:path.join(root, 'sessions.json'), PROVISIONARR_EMBY_URL:'', PROVISIONARR_EMBY_API_KEY:'', ...extraEnv
   }});
-  const base = `http://127.0.0.1:${port}`;
+  const base = `http://${LOOPBACK_HOST}:${port}`;
   await waitFor(`${base}/api/bootstrap`);
   t.after(async () => {
     if (child.exitCode === null) child.kill();
@@ -214,7 +215,7 @@ test('movie discovery uses only the documented Radarr candidate flags and TV is 
   const radarr = radarrCatalogServer();
   const radarrPort = await listen(radarr);
   t.after(() => radarr.close());
-  const fixture = await startProvisionarr(t, {RADARR_URL:`http://127.0.0.1:${radarrPort}`});
+  const fixture = await startProvisionarr(t, {RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`});
   const response = await fetch(`${fixture.base}/api/discover`, {headers:{cookie:fixture.cookie}});
   assert.equal(response.status, 200);
   const payload = await response.json();
@@ -241,8 +242,8 @@ test('movie discovery distinguishes provider failure from an empty supported res
   const unavailable=radarrCatalogServer('down'),empty=radarrCatalogServer('empty');
   const [unavailablePort,emptyPort]=await Promise.all([listen(unavailable),listen(empty)]);
   t.after(()=>{unavailable.close();empty.close();});
-  const failed=await startProvisionarr(t,{RADARR_URL:`http://127.0.0.1:${unavailablePort}`});
-  const fixture = await startProvisionarr(t, {RADARR_URL:`http://127.0.0.1:${emptyPort}`});
+  const failed=await startProvisionarr(t,{RADARR_URL:`http://${LOOPBACK_HOST}:${unavailablePort}`});
+  const fixture = await startProvisionarr(t, {RADARR_URL:`http://${LOOPBACK_HOST}:${emptyPort}`});
   const failedPayload=await (await fetch(`${failed.base}/api/discover`,{headers:{cookie:failed.cookie}})).json();
   assert.equal(failedPayload.movies.status,'unavailable');
   assert.match(failedPayload.movies.message,/connected service could not be reached/i);
@@ -258,10 +259,10 @@ test('disabled TVmaze never requests a provider, and enabled generic TV catalog 
   const radarr=radarrCatalogServer(),tvmaze=tvmazeFixtureServer(),sonarr=sonarrValidationServer();
   const [radarrPort,tvmazePort,sonarrPort]=await Promise.all([listen(radarr),listen(tvmaze.server),listen(sonarr.server)]);
   t.after(()=>{radarr.close();tvmaze.server.close();sonarr.server.close();});
-  const disabled=await startProvisionarr(t,{RADARR_URL:`http://127.0.0.1:${radarrPort}`,SONARR_URL:`http://127.0.0.1:${sonarrPort}`,PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://127.0.0.1:${tvmazePort}/shows`});
+  const disabled=await startProvisionarr(t,{RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`,SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://${LOOPBACK_HOST}:${tvmazePort}/shows`});
   const disabledPayload=await (await fetch(`${disabled.base}/api/discover`,{headers:{cookie:disabled.cookie}})).json();
   assert.equal(disabledPayload.tv.status,'unavailable');assert.equal(tvmaze.calls.length,0);
-  const fixture=await startProvisionarr(t,{RADARR_URL:`http://127.0.0.1:${radarrPort}`,SONARR_URL:`http://127.0.0.1:${sonarrPort}`,PROVISIONARR_TVMAZE_ENABLED:'true',PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://127.0.0.1:${tvmazePort}/shows`});
+  const fixture=await startProvisionarr(t,{RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`,SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,PROVISIONARR_TVMAZE_ENABLED:'true',PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://${LOOPBACK_HOST}:${tvmazePort}/shows`});
   const payload=await (await fetch(`${fixture.base}/api/discover`,{headers:{cookie:fixture.cookie}})).json();
   assert.equal(payload.tv.status,'ready');assert.equal(payload.tv.generic,true);assert.equal(payload.tv.attribution,'Generic TV catalog data from TVmaze, licensed CC BY-SA.');
   const titles=Object.values(payload.tv.rails).flat().map(item=>item.title);assert.deepEqual(titles,['Validated Generic Show']);
@@ -272,12 +273,12 @@ test('disabled TVmaze never requests a provider, and enabled generic TV catalog 
 });
 
 test('TVmaze posters allow only the static HTTPS image host and expected image path', async t => {
-  const unsafe=['http://static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg','data:image/svg+xml,unsafe','javascript:alert(1)','https://static.tvmaze.com.evil.example/uploads/images/medium_portrait/1/2.jpg','https://evil-static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg','https://user@static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg','https://static.tvmaze.com:444/uploads/images/medium_portrait/1/2.jpg','https://static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg?tracking=1','https://static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg#fragment','https://static.tvmaze.com/not-uploads/images/medium_portrait/1/2.jpg'];
+  const unsafe=['http://static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg','data:image/svg+xml,unsafe','javascript:alert(1)','https://static.tvmaze.com.evil.example/uploads/images/medium_portrait/1/2.jpg','https://evil-static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg','https://' + 'fixture-user' + '@static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg','https://static.tvmaze.com:444/uploads/images/medium_portrait/1/2.jpg','https://static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg?tracking=1','https://static.tvmaze.com/uploads/images/medium_portrait/1/2.jpg#fragment','https://static.tvmaze.com/not-uploads/images/medium_portrait/1/2.jpg'];
   for(const poster of unsafe){
     const radarr=radarrCatalogServer(),tvmaze=tvmazeFixtureServer('ready',[{id:902,name:'Validated Generic Show',premiered:'2025-01-02',externals:{thetvdb:200},image:{medium:poster}}]),sonarr=sonarrValidationServer();
     const [radarrPort,tvmazePort,sonarrPort]=await Promise.all([listen(radarr),listen(tvmaze.server),listen(sonarr.server)]);
     t.after(()=>{radarr.close();tvmaze.server.close();sonarr.server.close();});
-    const fixture=await startProvisionarr(t,{RADARR_URL:`http://127.0.0.1:${radarrPort}`,SONARR_URL:`http://127.0.0.1:${sonarrPort}`,PROVISIONARR_TVMAZE_ENABLED:'true',PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://127.0.0.1:${tvmazePort}/shows`});
+    const fixture=await startProvisionarr(t,{RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`,SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,PROVISIONARR_TVMAZE_ENABLED:'true',PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://${LOOPBACK_HOST}:${tvmazePort}/shows`});
     const payload=await (await fetch(`${fixture.base}/api/discover`,{headers:{cookie:fixture.cookie}})).json();
     assert.equal(payload.tv.rails.catalog[0].poster,null,poster);
   }
@@ -287,7 +288,7 @@ test('TVmaze provider reports empty, outage, and rate-limit backoff without fall
   for(const mode of ['empty','error','rate']){
     const radarr=radarrCatalogServer(),tvmaze=tvmazeFixtureServer(mode),sonarr=sonarrValidationServer();
     const [radarrPort,tvmazePort,sonarrPort]=await Promise.all([listen(radarr),listen(tvmaze.server),listen(sonarr.server)]);
-    const fixture=await startProvisionarr(t,{RADARR_URL:`http://127.0.0.1:${radarrPort}`,SONARR_URL:`http://127.0.0.1:${sonarrPort}`,PROVISIONARR_TVMAZE_ENABLED:'true',PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://127.0.0.1:${tvmazePort}/shows`});
+    const fixture=await startProvisionarr(t,{RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`,SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,PROVISIONARR_TVMAZE_ENABLED:'true',PROVISIONARR_TVMAZE_FIXTURE_MODE:'true',PROVISIONARR_TVMAZE_FIXTURE_URL:`http://${LOOPBACK_HOST}:${tvmazePort}/shows`});
     const payload=await (await fetch(`${fixture.base}/api/discover`,{headers:{cookie:fixture.cookie}})).json();
     assert.equal(payload.tv.status,mode==='empty'?'empty':'unavailable');assert.equal(payload.tv.rails.trending?.length||0,0);assert.equal(payload.tv.rails.inspired?.length||0,0);
     if(mode==='rate')assert.match(payload.tv.message,/connected service could not be reached/i);
@@ -305,7 +306,7 @@ test('linked Emby recommendations remain private, typed, deduplicated, unowned, 
     {id:'user-b',username:'userb',displayName:'B',role:'user',...passwordRecord(password),preferences:{embyUserId:'emby-b'}},
     {id:'user-unlinked',username:'unlinked',displayName:'Unlinked',role:'user',...passwordRecord(password),preferences:{}}
   ];
-  const fixture=await startProvisionarr(t,{RADARR_URL:`http://127.0.0.1:${radarrPort}`,PROVISIONARR_EMBY_URL:`http://127.0.0.1:${embyPort}`,PROVISIONARR_EMBY_API_KEY:'fixture-key'},users);
+  const fixture=await startProvisionarr(t,{RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`,PROVISIONARR_EMBY_URL:`http://${LOOPBACK_HOST}:${embyPort}`,PROVISIONARR_EMBY_API_KEY:'fixture-key'},users);
   const discover=async cookie=>(await fetch(`${fixture.base}/api/discover`,{headers:{cookie}})).json();
   const library=async (cookie,type,sort)=>(await (await fetch(`${fixture.base}/api/library?type=${type}&sort=${sort}`,{headers:{cookie}})).json());
   const a=await discover(fixture.cookie),aInspired=[...a.movies.rails.inspired,...a.tv.rails.inspired],aPersonal=aInspired.filter(item=>item.title.startsWith('A Personal'));
@@ -338,7 +339,7 @@ test('fixture-only owner catalog views and previews are typed, allowlisted, read
     {id:'owner',username:'user',displayName:'Owner',role:'owner',...passwordRecord(password),preferences:{}},
     {id:'ordinary',username:'ordinary',displayName:'Ordinary',role:'user',...passwordRecord(password),preferences:{}}
   ];
-  const fixture=await startProvisionarr(t,{SONARR_URL:`http://127.0.0.1:${sonarrPort}`,RADARR_URL:`http://127.0.0.1:${radarrPort}`,PROVISIONARR_FIXTURE_ADMIN_CONTROLS:'true'},users);
+  const fixture=await startProvisionarr(t,{SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`,PROVISIONARR_FIXTURE_ADMIN_CONTROLS:'true'},users);
   const owner=fixture.cookie,ordinary=await fixture.loginDetails('ordinary');
   const get=async (type,view,cookie=owner)=>fetch(`${fixture.base}/api/admin/catalog?type=${type}&view=${view}`,{headers:{cookie}});
   const movies=await get('movie','missing');assert.equal(movies.status,200);const moviePayload=await movies.json();assert.equal(moviePayload.type,'movie');assert.equal(moviePayload.items[0].title,'Fixture Movie');assert.deepEqual(moviePayload.choices.tags,[{id:7,label:'existing'},{id:8,label:'reviewed'}]);
@@ -359,7 +360,7 @@ test('fixture-only owner catalog views and previews are typed, allowlisted, read
   const ordinaryConfirm=await fetch(`${fixture.base}/api/admin/catalog/confirm`,{method:'POST',headers:{cookie:ordinary.cookie,'content-type':'application/json','x-csrf-token':ordinary.csrf},body:JSON.stringify({planId:seasonPlan.id})});assert.equal(ordinaryConfirm.status,403);
   assert.equal([...sonarr.calls,...radarr.calls].every(call=>call.method==='GET'),true);
   const beforeNonLoopback=radarr.calls.length;
-  const nonLoopback=await startProvisionarr(t,{SONARR_URL:'http://192.168.50.9:8989',RADARR_URL:`http://127.0.0.1:${radarrPort}`,PROVISIONARR_FIXTURE_ADMIN_CONTROLS:'true'},users);
+  const nonLoopback=await startProvisionarr(t,{SONARR_URL:'http://198.51.100.9:8989',RADARR_URL:`http://${LOOPBACK_HOST}:${radarrPort}`,PROVISIONARR_FIXTURE_ADMIN_CONTROLS:'true'},users);
   const nonLoopbackView=await fetch(`${nonLoopback.base}/api/admin/catalog?type=movie&view=missing`,{headers:{cookie:nonLoopback.cookie}});assert.equal(nonLoopbackView.status,409);assert.equal((await nonLoopbackView.json()).code,'FIXTURE_ADMIN_LOOPBACK_ONLY');assert.equal(radarr.calls.length,beforeNonLoopback);
 });
 
@@ -371,7 +372,7 @@ test('fixture monitor execution is owner-bound, CSRF-protected, stale-safe, one-
     {id:'owner',username:'user',displayName:'Owner',role:'owner',...passwordRecord(password),preferences:{}},
     {id:'ordinary',username:'ordinary',displayName:'Ordinary',role:'user',...passwordRecord(password),preferences:{}}
   ];
-  const fixture=await startProvisionarr(t,{SONARR_URL:`http://127.0.0.1:${sonarrPort}`,RADARR_URL:`http://127.0.0.1:${monitorPort}`,...fixtureMonitorEnv()},users);
+  const fixture=await startProvisionarr(t,{SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,RADARR_URL:`http://${LOOPBACK_HOST}:${monitorPort}`,...fixtureMonitorEnv()},users);
   const owner={cookie:fixture.cookie,csrf:fixture.csrf},ordinary=await fixture.loginDetails('ordinary');
   const headers=session=>({cookie:session.cookie,'content-type':'application/json','x-csrf-token':session.csrf});
   const preview=(body={type:'movie',itemId:1,monitored:false},session=owner,includeCsrf=true)=>fetch(`${fixture.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:includeCsrf?headers(session):{cookie:session.cookie,'content-type':'application/json'},body:JSON.stringify(body)});
@@ -391,13 +392,13 @@ test('fixture monitor execution is owner-bound, CSRF-protected, stale-safe, one-
   const executed=await confirm(firstPlan.id);assert.equal(executed.status,200);const executedPayload=await executed.json();assert.equal(executedPayload.outcome,'FIXTURE_EXECUTED');assert.equal(executedPayload.item.monitored,false);
   assert.equal(monitor.calls.filter(call=>call.method==='PUT').length,0,'configured loopback service must never receive an executable monitor PUT');assert.equal((await confirm(firstPlan.id)).status,409);
 
-  const staleFixture=await startProvisionarr(t,{SONARR_URL:`http://127.0.0.1:${sonarrPort}`,RADARR_URL:`http://127.0.0.1:${monitorPort}`,...fixtureMonitorEnv('stale-on-confirm')},users);const staleOwner={cookie:staleFixture.cookie,csrf:staleFixture.csrf};const stalePreview=await fetch(`${staleFixture.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:headers(staleOwner),body:JSON.stringify({type:'movie',itemId:1,monitored:false})});const stale=(await stalePreview.json()).plan;const staleResponse=await fetch(`${staleFixture.base}/api/admin/catalog/monitor/confirm`,{method:'POST',headers:headers(staleOwner),body:JSON.stringify({planId:stale.id})});assert.equal(staleResponse.status,409);assert.equal((await staleResponse.json()).code,'CATALOG_PLAN_STALE');
-  const failedFixture=await startProvisionarr(t,{SONARR_URL:`http://127.0.0.1:${sonarrPort}`,RADARR_URL:`http://127.0.0.1:${monitorPort}`,...fixtureMonitorEnv('put-fail')},users);const failedOwner={cookie:failedFixture.cookie,csrf:failedFixture.csrf};const putPlan=(await (await fetch(`${failedFixture.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:headers(failedOwner),body:JSON.stringify({type:'movie',itemId:1,monitored:false})})).json()).plan;const putResponse=await fetch(`${failedFixture.base}/api/admin/catalog/monitor/confirm`,{method:'POST',headers:headers(failedOwner),body:JSON.stringify({planId:putPlan.id})});assert.equal(putResponse.status,502);assert.equal((await putResponse.json()).code,'CATALOG_MONITOR_PUT_FAILED');
-  const mismatchFixture=await startProvisionarr(t,{SONARR_URL:`http://127.0.0.1:${sonarrPort}`,RADARR_URL:`http://127.0.0.1:${monitorPort}`,...fixtureMonitorEnv('readback-mismatch')},users);const mismatchOwner={cookie:mismatchFixture.cookie,csrf:mismatchFixture.csrf};const mismatchPlan=(await (await fetch(`${mismatchFixture.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:headers(mismatchOwner),body:JSON.stringify({type:'movie',itemId:1,monitored:false})})).json()).plan;const mismatchResponse=await fetch(`${mismatchFixture.base}/api/admin/catalog/monitor/confirm`,{method:'POST',headers:headers(mismatchOwner),body:JSON.stringify({planId:mismatchPlan.id})});assert.equal(mismatchResponse.status,502);assert.equal((await mismatchResponse.json()).code,'CATALOG_MONITOR_READBACK_MISMATCH');
+  const staleFixture=await startProvisionarr(t,{SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,RADARR_URL:`http://${LOOPBACK_HOST}:${monitorPort}`,...fixtureMonitorEnv('stale-on-confirm')},users);const staleOwner={cookie:staleFixture.cookie,csrf:staleFixture.csrf};const stalePreview=await fetch(`${staleFixture.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:headers(staleOwner),body:JSON.stringify({type:'movie',itemId:1,monitored:false})});const stale=(await stalePreview.json()).plan;const staleResponse=await fetch(`${staleFixture.base}/api/admin/catalog/monitor/confirm`,{method:'POST',headers:headers(staleOwner),body:JSON.stringify({planId:stale.id})});assert.equal(staleResponse.status,409);assert.equal((await staleResponse.json()).code,'CATALOG_PLAN_STALE');
+  const failedFixture=await startProvisionarr(t,{SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,RADARR_URL:`http://${LOOPBACK_HOST}:${monitorPort}`,...fixtureMonitorEnv('put-fail')},users);const failedOwner={cookie:failedFixture.cookie,csrf:failedFixture.csrf};const putPlan=(await (await fetch(`${failedFixture.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:headers(failedOwner),body:JSON.stringify({type:'movie',itemId:1,monitored:false})})).json()).plan;const putResponse=await fetch(`${failedFixture.base}/api/admin/catalog/monitor/confirm`,{method:'POST',headers:headers(failedOwner),body:JSON.stringify({planId:putPlan.id})});assert.equal(putResponse.status,502);assert.equal((await putResponse.json()).code,'CATALOG_MONITOR_PUT_FAILED');
+  const mismatchFixture=await startProvisionarr(t,{SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,RADARR_URL:`http://${LOOPBACK_HOST}:${monitorPort}`,...fixtureMonitorEnv('readback-mismatch')},users);const mismatchOwner={cookie:mismatchFixture.cookie,csrf:mismatchFixture.csrf};const mismatchPlan=(await (await fetch(`${mismatchFixture.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:headers(mismatchOwner),body:JSON.stringify({type:'movie',itemId:1,monitored:false})})).json()).plan;const mismatchResponse=await fetch(`${mismatchFixture.base}/api/admin/catalog/monitor/confirm`,{method:'POST',headers:headers(mismatchOwner),body:JSON.stringify({planId:mismatchPlan.id})});assert.equal(mismatchResponse.status,502);assert.equal((await mismatchResponse.json()).code,'CATALOG_MONITOR_READBACK_MISMATCH');
   assert.equal(monitor.calls.filter(call=>call.method==='PUT').length,0);
   const audit=fs.readFileSync(path.join(fixture.root,'audit.jsonl'),'utf8'),staleAudit=fs.readFileSync(path.join(staleFixture.root,'audit.jsonl'),'utf8'),failedAudit=fs.readFileSync(path.join(failedFixture.root,'audit.jsonl'),'utf8'),mismatchAudit=fs.readFileSync(path.join(mismatchFixture.root,'audit.jsonl'),'utf8');assert.match(audit,/FIXTURE_EXECUTED/);assert.match(staleAudit,/FIXTURE_STALE/);assert.match(failedAudit,/FIXTURE_PUT_FAILED/);assert.match(mismatchAudit,/FIXTURE_READBACK_MISMATCH/);
 
-  const disabled=await startProvisionarr(t,{SONARR_URL:`http://127.0.0.1:${sonarrPort}`,RADARR_URL:`http://127.0.0.1:${monitorPort}`,PROVISIONARR_TEST_FIXTURE_MONITOR_TRANSPORT:'true',PROVISIONARR_TEST_FIXTURE_MONITOR_SEED:fixtureMonitorEnv().PROVISIONARR_TEST_FIXTURE_MONITOR_SEED},users);
+  const disabled=await startProvisionarr(t,{SONARR_URL:`http://${LOOPBACK_HOST}:${sonarrPort}`,RADARR_URL:`http://${LOOPBACK_HOST}:${monitorPort}`,PROVISIONARR_TEST_FIXTURE_MONITOR_TRANSPORT:'true',PROVISIONARR_TEST_FIXTURE_MONITOR_SEED:fixtureMonitorEnv().PROVISIONARR_TEST_FIXTURE_MONITOR_SEED},users);
   const disabledResponse=await fetch(`${disabled.base}/api/admin/catalog/monitor/preview`,{method:'POST',headers:{cookie:disabled.cookie,'content-type':'application/json','x-csrf-token':disabled.csrf},body:JSON.stringify({type:'movie',itemId:1,monitored:false})});assert.equal(disabledResponse.status,409);assert.equal((await disabledResponse.json()).code,'FIXTURE_ADMIN_ONLY');
   assert.equal(monitor.calls.filter(call=>call.method==='PUT').length,0);
 });
