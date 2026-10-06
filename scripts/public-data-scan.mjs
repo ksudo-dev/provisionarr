@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isHistoricalSyntheticFixture } from './public-data-fixture-allowances.mjs';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 const findings = [];
@@ -34,12 +35,12 @@ const rules = [
   },
 ];
 
-function scanText(ref, path, text) {
+function scanText(ref, path, text, blob) {
   if (text.includes('\0')) return;
   for (const rule of rules) {
     rule.regex.lastIndex = 0;
     for (const match of text.matchAll(rule.regex)) {
-      if (rule.allow?.(match[0])) continue;
+      if (rule.allow?.(match[0]) || isHistoricalSyntheticFixture({rule:rule.name, path, value:match[0], blob})) continue;
       const line = text.slice(0, match.index).split('\n').length;
       findings.push({ rule: rule.name, ref, path, line });
     }
@@ -75,7 +76,7 @@ for (const commit of commits) {
     if (type !== 'blob' || seenBlobs.has(blob)) continue;
     seenBlobs.add(blob);
     const content = gitText(['show', `${commit}:${path}`], null).toString('utf8');
-    scanText(commit.slice(0, 12), path, content);
+    scanText(commit.slice(0, 12), path, content, blob);
     scanReleasePolicy(commit.slice(0, 12), path, content);
   }
 }

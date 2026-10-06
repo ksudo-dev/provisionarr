@@ -17,7 +17,33 @@ function write(root, file, content) {
   fs.writeFileSync(target, content);
 }
 
-test('public-data scan checks commits reachable from non-HEAD refs', () => {
+const allowanceModule = path.join(__dirname, '..', 'scripts', 'public-data-fixture-allowances.mjs');
+const historicalBlobs = {
+  c648: ['147f6e2ff758f003', 'b031b0943dd64897', '32a20376'].join(''),
+  checkpoint: ['2f449baf8b1c5b64', '8bdd6f0c2247db62', 'bb9a74fa'].join(''),
+  latest: ['bc20d8769840db64', '7d729502a01258fd', '23b05747'].join(''),
+};
+const historicalPrivateAddress = ['192', '168', '50', '9'].join('.');
+const historicalPosterUserinfo = 'user' + '@' + 'static.tvmaze.com';
+
+test('historical fixture allowance is exact to blob, path, rule, and value', async () => {
+  const {isHistoricalSyntheticFixture} = await import(allowanceModule);
+  const context = {path:'test/discovery-catalog.test.js'};
+  for (const blob of Object.values(historicalBlobs)) {
+    assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob}), true);
+  }
+  for (const blob of [historicalBlobs.c648, historicalBlobs.latest]) {
+    assert.equal(isHistoricalSyntheticFixture({...context, rule:'personal email address', value:historicalPosterUserinfo, blob}), true);
+  }
+  assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648.slice(0,-1)+'0'}), false);
+  assert.equal(isHistoricalSyntheticFixture({path:'test/other.test.js', rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:['192','168','50','10'].join('.'), blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalSyntheticFixture({...context, rule:'personal email address', value:'person' + '@' + 'private.invalid', blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalSyntheticFixture({...context, rule:'32-character hexadecimal token', value:'0123456789abcdef' + '0123456789abcdef', blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:historicalPrivateAddress}), false);
+});
+
+test('public-data scan retains failures from reachable non-HEAD refs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'provisionarr-public-scan-'));
   try {
     git(root, 'init', '-b', 'main');
