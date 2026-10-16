@@ -17,7 +17,65 @@ function write(root, file, content) {
   fs.writeFileSync(target, content);
 }
 
-test('public-data scan checks commits reachable from non-HEAD refs', () => {
+const allowanceModule = path.join(__dirname, '..', 'scripts', 'public-data-fixture-allowances.mjs');
+const historicalBlobs = {
+  c648: ['147f6e2ff758f003', 'b031b0943dd64897', '32a20376'].join(''),
+  checkpoint: ['2f449baf8b1c5b64', '8bdd6f0c2247db62', 'bb9a74fa'].join(''),
+  latest: ['bc20d8769840db64', '7d729502a01258fd', '23b05747'].join(''),
+};
+const historicalPrivateAddress = ['192', '168', '50', '9'].join('.');
+const historicalPosterUserinfo = 'user' + '@' + 'static.tvmaze.com';
+const historicalConductEmail = 'k' + '@' + 'sudo-dev.com';
+const historicalConductBlob = ['4019fb0c4429b3cf', '741966de610b0242', '2060f809'].join('');
+
+test('historical fixture allowance is exact to blob, path, rule, and value', async () => {
+  const {isHistoricalPublicDataAllowance} = await import(allowanceModule);
+  const context = {path:'test/discovery-catalog.test.js'};
+  for (const blob of Object.values(historicalBlobs)) {
+    assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob}), true);
+  }
+  for (const blob of [historicalBlobs.c648, historicalBlobs.latest]) {
+    assert.equal(isHistoricalPublicDataAllowance({...context, rule:'personal email address', value:historicalPosterUserinfo, blob}), true);
+  }
+  assert.equal(isHistoricalPublicDataAllowance({path:'CODE_OF_CONDUCT.md', rule:'personal email address', value:historicalConductEmail, blob:historicalConductBlob}), true);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648.slice(0,-1)+'0'}), false);
+  assert.equal(isHistoricalPublicDataAllowance({path:'test/other.test.js', rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:['192','168','50','10'].join('.'), blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'personal email address', value:'person' + '@' + 'private.invalid', blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'32-character hexadecimal token', value:'0123456789abcdef' + '0123456789abcdef', blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:historicalPrivateAddress}), false);
+  assert.equal(isHistoricalPublicDataAllowance({path:'README.md', rule:'personal email address', value:historicalConductEmail, blob:historicalConductBlob}), false);
+  assert.equal(isHistoricalPublicDataAllowance({path:'CODE_OF_CONDUCT.md', rule:'personal email address', value:'other' + '@' + 'sudo-dev.com', blob:historicalConductBlob}), false);
+});
+
+test('path-sensitive allowances inspect the same blob at every path', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'provisionarr-public-scan-paths-'));
+  try {
+    git(root, 'init', '-b', 'main');
+    git(root, 'config', 'user.name', 'Provisionarr Test');
+    git(root, 'config', 'user.email', 'provisionarr-test@users.noreply.github.com');
+    write(root, 'Dockerfile', `FROM node:22-alpine@sha256:${'a'.repeat(64)}\n`);
+    write(root, 'scripts/public-safety-scan.sh', `GITLEAKS_IMAGE="zricethezav/gitleaks@sha256:${'b'.repeat(64)}"\n`);
+    write(root, '.github/workflows/ci.yml', `steps:\n  - uses: actions/checkout@${'c'.repeat(40)}\n`);
+    const conduct = execFileSync('git', ['cat-file', 'blob', historicalConductBlob], {
+      cwd:path.join(__dirname, '..'),
+      encoding:'utf8',
+    });
+    write(root, 'CODE_OF_CONDUCT.md', conduct);
+    write(root, 'z-copy/CODE_OF_CONDUCT.md', conduct);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'duplicate historical blob at an unapproved path');
+
+    assert.throws(
+      () => execFileSync(process.execPath, [scanner], {cwd:root, encoding:'utf8', stdio:['ignore', 'pipe', 'pipe']}),
+      error => String(error.stderr).includes('z-copy/CODE_OF_CONDUCT.md')
+    );
+  } finally {
+    fs.rmSync(root, {recursive:true, force:true});
+  }
+});
+
+test('public-data scan retains failures from reachable non-HEAD refs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'provisionarr-public-scan-'));
   try {
     git(root, 'init', '-b', 'main');
