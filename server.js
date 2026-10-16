@@ -882,7 +882,7 @@ function diagnostics() { let version='development';try{version=JSON.parse(fs.rea
 function loadRequests() { try { return JSON.parse(fs.readFileSync(requestLog,'utf8')); } catch { return []; } }
 function writeRequests(items) { atomicWriteJson(requestLog,items.slice(0,500)); }
 function saveRequest(item) { const items=loadRequests(); items.unshift({id:item.id||crypto.randomUUID(),createdAt:item.createdAt||new Date().toISOString(),...item}); writeRequests(items); }
-async function requestPolicyFor(user) { if(user?.role==='owner')return {startNow:true};const disk=diskStatus();if(runtimeSettings.pauseRequestsWhenStorageLow!==false&&disk.low)return {startNow:false,reason:'storage_low',message:'Storage is currently limited, so your request is waiting for the system administrator.'};if(runtimeSettings.userAutoApprove===false)return {startNow:false,reason:'approval_required',message:'Your request is waiting for the system administrator.'};const limit=Math.max(1,Math.min(20,Number(runtimeSettings.userActiveRequestLimit)||3)),history=await requestHistory(),active=history.filter(x=>x.requestedBy===user.id&&!['available','failed','error'].includes(String(x.displayStatus||x.status))).length;if(active>=limit)return {startNow:false,reason:'allotment_reached',message:`You already have ${active} active request${active===1?'':'s'}. This request is waiting for the system administrator.`};return {startNow:true,remaining:Math.max(0,limit-active-1)}; }
+async function requestPolicyFor(user) { if(user?.role==='owner')return {startNow:true};const disk=diskStatus();if(runtimeSettings.pauseRequestsWhenStorageLow!==false&&disk.low)return {startNow:false,reason:'storage_low',message:'Storage is below the configured safety threshold, so no request was sent to Sonarr or Radarr. Your request is waiting for the system administrator.'};if(runtimeSettings.userAutoApprove===false)return {startNow:false,reason:'approval_required',message:'Your request is waiting for the system administrator.'};const limit=Math.max(1,Math.min(20,Number(runtimeSettings.userActiveRequestLimit)||3)),history=await requestHistory(),active=history.filter(x=>x.requestedBy===user.id&&!['available','failed','error'].includes(String(x.displayStatus||x.status))).length;if(active>=limit)return {startNow:false,reason:'allotment_reached',message:`You already have ${active} active request${active===1?'':'s'}. This request is waiting for the system administrator.`};return {startNow:true,remaining:Math.max(0,limit-active-1)}; }
 function queuePendingRequest(item,user,policy) { const record={id:crypto.randomUUID(),title:item.title,service:services[item.serviceId]?.label||item.service,createdAt:new Date().toISOString(),status:'pending_approval',displayStatus:'pending_approval',requestedSeason:item.seasonNumber||null,requestedBy:user.id,requestedByName:user.displayName||user.username,holdReason:policy.reason,requestItem:{title:item.title,kind:item.kind,serviceId:item.serviceId,year:item.year,tvdbId:item.tvdbId,tmdbId:item.tmdbId,seasons:item.seasons||[],seasonNumber:item.seasonNumber||null,seasonTitle:item.seasonTitle||null,arrId:item.arrId||null}};saveRequest(record);return {ok:true,accepted:false,pendingApproval:true,requestId:record.id,title:item.title,message:policy.message}; }
 async function withRequestAdmission(user,operation) { if(user?.role==='owner')return operation();const key=String(user?.id||'unknown'),previous=requestAdmissionLocks.get(key)||Promise.resolve();let release;const gate=new Promise(resolve=>{release=resolve}),tail=previous.then(()=>gate);requestAdmissionLocks.set(key,tail);await previous;try{return await operation();}finally{release();if(requestAdmissionLocks.get(key)===tail)requestAdmissionLocks.delete(key);} }
 async function submitRequest(req,item,user,auditAction='request_submitted') { return withRequestAdmission(user,async()=>{const policy=await requestPolicyFor(user);if(!policy.startNow){const pending=queuePendingRequest(item,user,policy);audit(req,'request_held',{title:item.title,userId:user.id,reason:policy.reason});return pending;}const result=await createRequest(item,user);audit(req,auditAction,{title:item.title,service:item.serviceId,userId:user.id});return result;}); }
@@ -908,10 +908,24 @@ function seasonList(seasons, target, preserveOthers) {
   return result;
 }
 
+async function findDuplicateRequest(item,requester,ignoreRequestId,service,requestedSeason) {
+  const candidates=loadRequests().filter(record=>record.id!==ignoreRequestId&&record.requestedBy===(requester?.id||null)&&record.service===service.label&&titleKey(record.title)===titleKey(item.title)&&Number(record.requestedSeason??-1)===Number(requestedSeason??-1)&&!['failed','error','stale'].includes(String(record.displayStatus||record.status)));
+  const pending=candidates.find(record=>record.status==='pending_approval');
+  const accepted=candidates.filter(record=>record.status!=='pending_approval');
+  if(!accepted.length)return pending||null;
+  let response;
+  try { response=await api(service,service.library); }
+  catch { return pending||accepted[0]; }
+  if(response.status<200||response.status>=300||!Array.isArray(response.data))return pending||accepted[0];
+  const library=response.data;
+  const live=accepted.find(record=>library.some(row=>String(row.id)===String(record.arrId)||titleKey(canonicalTitle(row.title))===titleKey(canonicalTitle(record.title))));
+  return pending||live||null;
+}
+
 async function createRequest(item,requester=null,ignoreRequestId=null) {
   const s=services[item.serviceId]; if (!s) throw new Error('Unknown ARR service');
   const requestedSeason=item.kind==='series' && item.seasonNumber!==null && item.seasonNumber!==undefined ? Number(item.seasonNumber) : null;
-  const duplicate=loadRequests().find(record=>record.id!==ignoreRequestId&&record.requestedBy===(requester?.id||null)&&record.service===s.label&&titleKey(record.title)===titleKey(item.title)&&Number(record.requestedSeason??-1)===Number(requestedSeason??-1)&&!['failed','error'].includes(String(record.displayStatus||record.status)));
+  const duplicate=await findDuplicateRequest(item,requester,ignoreRequestId,s,requestedSeason);
   if(duplicate)return {ok:true,accepted:true,alreadyRequested:true,title:item.title,service:s.label,requestId:duplicate.id,message:'This title is already in your requests.'};
   let arrId=item.arrId||null;
 
