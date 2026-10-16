@@ -380,10 +380,10 @@ test('stale accepted requests are reconciled against the ARR library before dupl
   await new Promise(resolve => radarrHttp.listen(radarrPort, '127.0.0.1', resolve));
   t.after(() => radarrHttp.close());
 
-  const fixture = await startFixture(t, {RADARR_URL:`http://127.0.0.1:${radarrPort}`}, {pauseRequestsWhenStorageLow:false});
+  const fixture = await startFixture(t, {RADARR_URL:`http://127.0.0.1:${radarrPort}`}, {pauseRequestsWhenStorageLow:false,userActiveRequestLimit:1});
   const user = await login(fixture.base, 'testarr');
   fs.writeFileSync(path.join(fixture.root, 'requests.json'), JSON.stringify([{
-    id:'stale-request', title:'Stale Movie', service:'Movies', createdAt:new Date().toISOString(), status:'accepted', arrId:999, requestedBy:'user'
+    id:'stale-request', title:'Stale Movie', service:'Movies', createdAt:new Date(Date.now()-10*60*1000).toISOString(), status:'accepted', arrId:999, requestedBy:'user'
   }]));
 
   const search = await (await fetch(`${fixture.base}/api/search?q=Stale%20Movie`, {headers:{cookie:user.cookie}})).json();
@@ -397,6 +397,8 @@ test('stale accepted requests are reconciled against the ARR library before dupl
   assert.equal(result.accepted, true);
   assert.equal(result.alreadyRequested, undefined);
   assert.equal(mutationCount, 1);
+  const requests = JSON.parse(fs.readFileSync(path.join(fixture.root, 'requests.json'), 'utf8'));
+  assert.equal(requests.find(item => item.id === 'stale-request').status, 'stale');
 });
 
 test('storage-held requests clearly state that no ARR request was sent', async t => {
