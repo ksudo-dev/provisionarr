@@ -360,6 +360,87 @@ test('proposal confirmation enforces ordinary-user approval policy before ARR mu
   assert.equal(mutationCount, 2);
 });
 
+test('stale accepted requests are reconciled against the ARR library before duplicate suppression', async t => {
+  const radarrPort = await unusedPort();
+  let mutationCount = 0;
+  const radarrHttp = require('node:http').createServer((request, response) => {
+    response.setHeader('content-type', 'application/json');
+    const target = new URL(request.url, 'http://fixture');
+    if (target.pathname === '/api/v3/movie/lookup') return response.end('[{"title":"Stale Movie","year":2025,"tmdbId":123}]');
+    if (target.pathname === '/api/v3/movie' && request.method === 'GET') return response.end('[]');
+    if (target.pathname === '/api/v3/rootfolder') return response.end('[{"path":"/movies"}]');
+    if (target.pathname === '/api/v3/qualityprofile') return response.end('[{"id":1,"name":"Any"}]');
+    if (target.pathname === '/api/v3/movie' && request.method === 'POST') {
+      mutationCount += 1;
+      response.statusCode = 201;
+      return response.end('{"id":321}');
+    }
+    response.end('[]');
+  });
+  await new Promise(resolve => radarrHttp.listen(radarrPort, '127.0.0.1', resolve));
+  t.after(() => radarrHttp.close());
+
+  const fixture = await startFixture(t, {RADARR_URL:`http://127.0.0.1:${radarrPort}`}, {pauseRequestsWhenStorageLow:false,userActiveRequestLimit:1});
+  const user = await login(fixture.base, 'testarr');
+  fs.writeFileSync(path.join(fixture.root, 'requests.json'), JSON.stringify([{
+    id:'stale-request', title:'Stale Movie', service:'Movies', createdAt:new Date(Date.now()-10*60*1000).toISOString(), status:'accepted', arrId:999, requestedBy:'user'
+  }]));
+
+  const search = await (await fetch(`${fixture.base}/api/search?q=Stale%20Movie`, {headers:{cookie:user.cookie}})).json();
+  const response = await fetch(`${fixture.base}/api/requests`, {
+    method:'POST',
+    headers:{'content-type':'application/json', cookie:user.cookie, 'x-csrf-token':user.csrf},
+    body:JSON.stringify({mediaRef:search.results[0].mediaRef})
+  });
+  const result = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(result.accepted, true);
+  assert.equal(result.alreadyRequested, undefined);
+  assert.equal(mutationCount, 1);
+  const requests = JSON.parse(fs.readFileSync(path.join(fixture.root, 'requests.json'), 'utf8'));
+  assert.equal(requests.find(item => item.id === 'stale-request').status, 'stale');
+});
+
+test('storage-held requests clearly state that no ARR request was sent', async t => {
+  const radarrPort = await unusedPort();
+  let mutationCount = 0;
+  const radarrHttp = require('node:http').createServer((request, response) => {
+    response.setHeader('content-type', 'application/json');
+    const target = new URL(request.url, 'http://fixture');
+    if (target.pathname === '/api/v3/movie/lookup') return response.end('[{"title":"Storage Test Movie","year":2025,"tmdbId":456}]');
+    if (target.pathname === '/api/v3/movie' && request.method === 'GET') return response.end('[]');
+    if (target.pathname === '/api/v3/queue') return response.end('{"records":[]}');
+    if (target.pathname === '/api/v3/movie' && request.method === 'POST') {
+      mutationCount += 1;
+      response.statusCode = 201;
+      return response.end('{"id":654}');
+    }
+    response.end('[]');
+  });
+  await new Promise(resolve => radarrHttp.listen(radarrPort, '127.0.0.1', resolve));
+  t.after(() => radarrHttp.close());
+
+  const fixture = await startFixture(t, {
+    RADARR_URL:`http://127.0.0.1:${radarrPort}`,
+    PROVISIONARR_MEDIA_ROOT:'/tmp'
+  }, {pauseRequestsWhenStorageLow:true, minFreeGb:999999, minFreePercent:1});
+  const user = await login(fixture.base, 'testarr');
+  const search = await (await fetch(`${fixture.base}/api/search?q=Storage%20Test%20Movie`, {headers:{cookie:user.cookie}})).json();
+  const response = await fetch(`${fixture.base}/api/requests`, {
+    method:'POST',
+    headers:{'content-type':'application/json', cookie:user.cookie, 'x-csrf-token':user.csrf},
+    body:JSON.stringify({mediaRef:search.results[0].mediaRef})
+  });
+  const result = await response.json();
+  assert.equal(response.status, 202);
+  assert.equal(result.accepted, false);
+  assert.equal(result.pendingApproval, true);
+  assert.match(result.message, /no request was sent to Sonarr or Radarr/);
+  assert.equal(mutationCount, 0);
+  const requests = await (await fetch(`${fixture.base}/api/requests`, {headers:{cookie:user.cookie}})).json();
+  assert.equal(requests.requests[0].holdReason, 'storage_low');
+});
+
 test('concurrent requests cannot exceed an ordinary user active-request allotment', async t => {
   const radarrPort = await unusedPort();
   let mutationCount = 0;
