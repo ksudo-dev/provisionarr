@@ -25,22 +25,27 @@ const historicalBlobs = {
 };
 const historicalPrivateAddress = ['192', '168', '50', '9'].join('.');
 const historicalPosterUserinfo = 'user' + '@' + 'static.tvmaze.com';
+const historicalConductEmail = 'k' + '@' + 'sudo-dev.com';
+const historicalConductBlob = ['4019fb0c4429b3cf', '741966de610b0242', '2060f809'].join('');
 
 test('historical fixture allowance is exact to blob, path, rule, and value', async () => {
-  const {isHistoricalSyntheticFixture} = await import(allowanceModule);
+  const {isHistoricalPublicDataAllowance} = await import(allowanceModule);
   const context = {path:'test/discovery-catalog.test.js'};
   for (const blob of Object.values(historicalBlobs)) {
-    assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob}), true);
+    assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob}), true);
   }
   for (const blob of [historicalBlobs.c648, historicalBlobs.latest]) {
-    assert.equal(isHistoricalSyntheticFixture({...context, rule:'personal email address', value:historicalPosterUserinfo, blob}), true);
+    assert.equal(isHistoricalPublicDataAllowance({...context, rule:'personal email address', value:historicalPosterUserinfo, blob}), true);
   }
-  assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648.slice(0,-1)+'0'}), false);
-  assert.equal(isHistoricalSyntheticFixture({path:'test/other.test.js', rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648}), false);
-  assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:['192','168','50','10'].join('.'), blob:historicalBlobs.c648}), false);
-  assert.equal(isHistoricalSyntheticFixture({...context, rule:'personal email address', value:'person' + '@' + 'private.invalid', blob:historicalBlobs.c648}), false);
-  assert.equal(isHistoricalSyntheticFixture({...context, rule:'32-character hexadecimal token', value:'0123456789abcdef' + '0123456789abcdef', blob:historicalBlobs.c648}), false);
-  assert.equal(isHistoricalSyntheticFixture({...context, rule:'private IPv4 address', value:historicalPrivateAddress}), false);
+  assert.equal(isHistoricalPublicDataAllowance({path:'CODE_OF_CONDUCT.md', rule:'personal email address', value:historicalConductEmail, blob:historicalConductBlob}), true);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648.slice(0,-1)+'0'}), false);
+  assert.equal(isHistoricalPublicDataAllowance({path:'test/other.test.js', rule:'private IPv4 address', value:historicalPrivateAddress, blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:['192','168','50','10'].join('.'), blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'personal email address', value:'person' + '@' + 'private.invalid', blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'32-character hexadecimal token', value:'0123456789abcdef' + '0123456789abcdef', blob:historicalBlobs.c648}), false);
+  assert.equal(isHistoricalPublicDataAllowance({...context, rule:'private IPv4 address', value:historicalPrivateAddress}), false);
+  assert.equal(isHistoricalPublicDataAllowance({path:'README.md', rule:'personal email address', value:historicalConductEmail, blob:historicalConductBlob}), false);
+  assert.equal(isHistoricalPublicDataAllowance({path:'CODE_OF_CONDUCT.md', rule:'personal email address', value:'other' + '@' + 'sudo-dev.com', blob:historicalConductBlob}), false);
 });
 
 test('public-data scan retains failures from reachable non-HEAD refs', () => {

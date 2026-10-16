@@ -1,7 +1,6 @@
-const discoveryCatalogPath = 'test/discovery-catalog.test.js';
-
-const historicalSyntheticFixtures = [
+const historicalPublicDataAllowances = [
   {
+    path: 'test/discovery-catalog.test.js',
     rule: 'private IPv4 address',
     value: ['192', '168', '50', '9'].join('.'),
     blobs: new Set([
@@ -11,6 +10,7 @@ const historicalSyntheticFixtures = [
     ]),
   },
   {
+    path: 'test/discovery-catalog.test.js',
     rule: 'personal email address',
     value: 'user' + '@' + 'static.tvmaze.com',
     blobs: new Set([
@@ -18,12 +18,20 @@ const historicalSyntheticFixtures = [
       ['bc20d8769840db64', '7d729502a01258fd', '23b05747'].join(''),
     ]),
   },
+  {
+    path: 'CODE_OF_CONDUCT.md',
+    rule: 'personal email address',
+    value: 'k' + '@' + 'sudo-dev.com',
+    blobs: new Set([
+      ['4019fb0c4429b3cf', '741966de610b0242', '2060f809'].join(''),
+    ]),
+  },
 ];
 
-// Historical fixture exemptions are pinned to the exact blob, path, rule, and
-// value. Working-tree matches have no blob identity and must remain findings.
-export function isHistoricalSyntheticFixture({rule, path, value, blob}) {
-  return Boolean(blob) && path === discoveryCatalogPath && historicalSyntheticFixtures.some(fixture =>
-    fixture.rule === rule && fixture.value === value && fixture.blobs.has(blob)
+// Historical allowances are pinned to the exact blob, path, rule, and value.
+// Working-tree matches have no blob identity and must remain findings.
+export function isHistoricalPublicDataAllowance({rule, path, value, blob}) {
+  return Boolean(blob) && historicalPublicDataAllowances.some(allowance =>
+    allowance.path === path && allowance.rule === rule && allowance.value === value && allowance.blobs.has(blob)
   );
 }

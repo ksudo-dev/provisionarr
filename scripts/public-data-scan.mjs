@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isHistoricalSyntheticFixture } from './public-data-fixture-allowances.mjs';
+import { isHistoricalPublicDataAllowance } from './public-data-fixture-allowances.mjs';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 const findings = [];
@@ -40,7 +40,7 @@ function scanText(ref, path, text, blob) {
   for (const rule of rules) {
     rule.regex.lastIndex = 0;
     for (const match of text.matchAll(rule.regex)) {
-      if (rule.allow?.(match[0]) || isHistoricalSyntheticFixture({rule:rule.name, path, value:match[0], blob})) continue;
+      if (rule.allow?.(match[0]) || isHistoricalPublicDataAllowance({rule:rule.name, path, value:match[0], blob})) continue;
       const line = text.slice(0, match.index).split('\n').length;
       findings.push({ rule: rule.name, ref, path, line });
     }
