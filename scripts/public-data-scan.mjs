@@ -73,8 +73,9 @@ for (const commit of commits) {
     const [metadata, path] = entry.split('\t');
     if (!metadata || !path) continue;
     const [, type, blob] = metadata.split(' ');
-    if (type !== 'blob' || seenBlobs.has(blob)) continue;
-    seenBlobs.add(blob);
+    const blobAtPath = `${blob}\0${path}`;
+    if (type !== 'blob' || seenBlobs.has(blobAtPath)) continue;
+    seenBlobs.add(blobAtPath);
     const content = gitText(['show', `${commit}:${path}`], null).toString('utf8');
     scanText(commit.slice(0, 12), path, content, blob);
     scanReleasePolicy(commit.slice(0, 12), path, content);

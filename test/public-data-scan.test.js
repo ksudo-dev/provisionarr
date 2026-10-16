@@ -48,6 +48,33 @@ test('historical fixture allowance is exact to blob, path, rule, and value', asy
   assert.equal(isHistoricalPublicDataAllowance({path:'CODE_OF_CONDUCT.md', rule:'personal email address', value:'other' + '@' + 'sudo-dev.com', blob:historicalConductBlob}), false);
 });
 
+test('path-sensitive allowances inspect the same blob at every path', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'provisionarr-public-scan-paths-'));
+  try {
+    git(root, 'init', '-b', 'main');
+    git(root, 'config', 'user.name', 'Provisionarr Test');
+    git(root, 'config', 'user.email', 'provisionarr-test@users.noreply.github.com');
+    write(root, 'Dockerfile', `FROM node:22-alpine@sha256:${'a'.repeat(64)}\n`);
+    write(root, 'scripts/public-safety-scan.sh', `GITLEAKS_IMAGE="zricethezav/gitleaks@sha256:${'b'.repeat(64)}"\n`);
+    write(root, '.github/workflows/ci.yml', `steps:\n  - uses: actions/checkout@${'c'.repeat(40)}\n`);
+    const conduct = execFileSync('git', ['cat-file', 'blob', historicalConductBlob], {
+      cwd:path.join(__dirname, '..'),
+      encoding:'utf8',
+    });
+    write(root, 'CODE_OF_CONDUCT.md', conduct);
+    write(root, 'z-copy/CODE_OF_CONDUCT.md', conduct);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'duplicate historical blob at an unapproved path');
+
+    assert.throws(
+      () => execFileSync(process.execPath, [scanner], {cwd:root, encoding:'utf8', stdio:['ignore', 'pipe', 'pipe']}),
+      error => String(error.stderr).includes('z-copy/CODE_OF_CONDUCT.md')
+    );
+  } finally {
+    fs.rmSync(root, {recursive:true, force:true});
+  }
+});
+
 test('public-data scan retains failures from reachable non-HEAD refs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'provisionarr-public-scan-'));
   try {
