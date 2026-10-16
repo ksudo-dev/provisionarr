@@ -133,6 +133,18 @@ test('unauthenticated bootstrap is safe and ordinary users cannot administer', a
   assert.equal((await admin.json()).code, 'OWNER_REQUIRED');
 });
 
+test('owner settings remain available when ARR profile lookups are disconnected', async t => {
+  const fixture = await startFixture(t, {
+    SONARR_URL:'http://127.0.0.1:65534',
+    RADARR_URL:'http://127.0.0.1:65534'
+  });
+  const owner = await login(fixture.base, 'owner');
+  const response = await fetch(`${fixture.base}/api/admin/settings`, {headers:{cookie:owner.cookie}});
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(payload.profiles, {tv:[], movies:[]});
+});
+
 test('malformed cookies, oversized bodies, and stalled bodies fail without destabilizing the server', async t => {
   const fixture = await startFixture(t, {PROVISIONARR_REQUEST_TIMEOUT_MS:'5000'});
   const malformed = await fetch(`${fixture.base}/api/bootstrap`, {headers:{cookie:'arr_session=%E0%A4%A'}});
