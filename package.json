@@ -29,7 +29,7 @@
     "test:e2e:qa": "playwright test test/ui.spec.js"
   },
   "dependencies": {
-    "nodemailer": "10.0.13"
+    "nodemailer": "10.1.4"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"
