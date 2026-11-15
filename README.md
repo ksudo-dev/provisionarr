@@ -84,6 +84,15 @@ Storage holds and request limits are shown before a request is confirmed. A
 held request stays visible to the system administrator instead of silently
 starting a download that the configured storage cannot support.
 
+## Library and recommendation privacy
+
+The Library is one shared household catalog: every signed-in Provisionarr user
+can browse the same owned Movies and TV shows, with the same sort and paging
+rules. Personal viewing history is not part of that catalog. A linked Emby
+profile is used only for that person's recommendation seeds and visible
+reasons; those recommendations and reasons are never shared with another user.
+See [catalog privacy](docs/CATALOG-PRIVACY.md) for the access-policy boundary.
+
 ## Generated stack deployment
 
 Guided setup can generate pinned Compose, environment, and instruction files
