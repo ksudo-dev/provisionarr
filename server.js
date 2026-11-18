@@ -920,14 +920,23 @@ async function sonarrLookupValidTvdb(tvdbId) {
   const response=await api(services.sonarr,`/api/v3/series/lookup?term=tvdb:${encodeURIComponent(tvdbId)}`);
   return response.status>=200&&response.status<300&&Array.isArray(response.data)&&response.data.some(row=>Number(row?.tvdbId)===Number(tvdbId));
 }
+async function validateTvmazeCandidates(candidates) {
+  const rows=Array(candidates.length),workers=Math.min(8,candidates.length);let next=0;
+  await Promise.all(Array.from({length:workers},async()=>{
+    while(next<candidates.length){
+      const index=next++,item=candidates[index];
+      rows[index]=await sonarrLookupValidTvdb(item.tvdbId)?{raw:{generic:true},item,score:Number(item.rating||0)}:null;
+    }
+  }));
+  return rows.filter(Boolean);
+}
 async function tvmazeDiscoverySource(options={}) {
   if(!TVMAZE_ENABLED)return null;
   const [generic,library]=await Promise.all([tvmazeGenericPage(),api(services.sonarr,services.sonarr.library)]);
   if(library.status<200||library.status>=300)throw new Error('TV library validation is unavailable.');
   const owned=new Set((Array.isArray(library.data)?library.data:[]).map(item=>mediaIdentity(item,services.sonarr)).filter(Boolean));
   const candidates=(Array.isArray(generic)?generic:[]).map(tvmazeMedia).filter(Boolean).filter(item=>!([...item.identities].some(identity=>owned.has(identity)))&& (options.includeUpcoming||releaseState(item)!=='upcoming'));
-  const rows=[];
-  for(const item of candidates.slice(0,40))if(await sonarrLookupValidTvdb(item.tvdbId))rows.push({raw:{generic:true},item,score:Number(item.rating||0)});
+  const rows=await validateTvmazeCandidates(candidates.slice(0,40));
   return {service:services.sonarr,owned,rows,generic:true,attribution:TVMAZE_ATTRIBUTION};
 }
 async function movieDiscoverySource(options={}) {
