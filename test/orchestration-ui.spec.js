@@ -215,19 +215,21 @@ test('owner connects and reviews compatible ARR services without exposing keys',
 });
 
 test('discovery and search keep movies separate from TV shows', async ({page}) => {
-  await page.route('**/api/discover',route=>route.fulfill({
+  await page.route('**/api/discover?*',route=>route.fulfill({
     contentType:'application/json',
     body:JSON.stringify({
-      inspired:[
-        {title:'Movie Alpha',year:2025,mediaType:'movie',serviceId:'radarr'},
-        {title:'Show Alpha',year:2025,mediaType:'series',serviceId:'sonarr'}
-      ],
-      trending:[
-        {title:'Movie Beta',year:2024,mediaType:'movie',serviceId:'radarr'},
-        {title:'Show Beta',year:2024,mediaType:'series',serviceId:'sonarr'}
-      ],
-      popular:[{title:'Movie Gamma',year:2023,mediaType:'movie',serviceId:'radarr'}],
-      newReleases:[{title:'Show Gamma',year:2026,mediaType:'series',serviceId:'sonarr'}]
+      movies:{status:'ready',rails:{
+        inspired:[{title:'Movie Alpha',year:2025,mediaType:'movie',serviceId:'radarr'}],
+        trending:[{title:'Movie Beta',year:2024,mediaType:'movie',serviceId:'radarr'}],
+        popular:[{title:'Movie Gamma',year:2023,mediaType:'movie',serviceId:'radarr'}],
+        newReleases:[]
+      }},
+      tv:{status:'ready',rails:{
+        inspired:[{title:'Show Alpha',year:2025,mediaType:'series',serviceId:'sonarr'}],
+        trending:[{title:'Show Beta',year:2024,mediaType:'series',serviceId:'sonarr'}],
+        popular:[],
+        newReleases:[{title:'Show Gamma',year:2026,mediaType:'series',serviceId:'sonarr'}]
+      }}
     })
   }));
   await page.goto(`${baseURL}/#/account`);
@@ -237,15 +239,19 @@ test('discovery and search keep movies separate from TV shows', async ({page}) =
   await expect(page).toHaveURL(/#\/guided-setup$/);
   await page.goto(`${baseURL}/#/home`);
   const movieDiscovery=page.locator('.media-category').filter({has:page.getByRole('heading',{name:'Movies',exact:true})});
-  const showDiscovery=page.locator('.media-category').filter({has:page.getByRole('heading',{name:'TV shows',exact:true})});
   await expect(movieDiscovery.getByRole('button',{name:'View Movie Alpha'})).toBeVisible();
   await expect(movieDiscovery.getByRole('button',{name:'View Movie Beta'})).toBeVisible();
   await expect(movieDiscovery.getByRole('button',{name:'View Movie Gamma'})).toBeVisible();
   await expect(movieDiscovery).not.toContainText('Show Alpha');
-  await expect(showDiscovery.getByRole('button',{name:'View Show Alpha'})).toBeVisible();
-  await expect(showDiscovery.getByRole('button',{name:'View Show Beta'})).toBeVisible();
-  await expect(showDiscovery.getByRole('button',{name:'View Show Gamma'})).toBeVisible();
-  await expect(showDiscovery).not.toContainText('Movie Alpha');
+  await page.locator('#catalog-context').selectOption('series');
+  await expect(page).toHaveURL(/#\/home\?type=series$/);
+  const typedShowDiscovery=page.locator('.media-category').filter({has:page.getByRole('heading',{name:'TV shows',exact:true})});
+  await expect(typedShowDiscovery.getByRole('button',{name:'View Show Alpha'})).toBeVisible();
+  await expect(typedShowDiscovery.getByRole('button',{name:'View Show Beta'})).toBeVisible();
+  await expect(typedShowDiscovery.getByRole('button',{name:'View Show Gamma'})).toBeVisible();
+  await expect(typedShowDiscovery).not.toContainText('Movie Alpha');
+  await page.goto(`${baseURL}/#/home`);
+  await expect(page.locator('.media-category').filter({has:page.getByRole('heading',{name:'TV shows',exact:true})})).toHaveCount(0);
 
   await page.route('**/api/search?*',route=>route.fulfill({
     contentType:'application/json',
