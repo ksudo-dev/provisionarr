@@ -68,11 +68,13 @@ async function startProvisionarr(t, extraEnv = {}, users = null) {
 
 function radarrCatalogServer(mode = 'ready') {
   const calls=[];
+  let transientDiscoveryFailure=mode==='retry';
   const server=http.createServer((request, response) => {
     calls.push(request.url);
     response.setHeader('content-type', 'application/json');
     if (mode === 'down') { response.statusCode = 503; return response.end(JSON.stringify({error:'fixture unavailable'})); }
     if (mode === 'empty' && request.url === '/api/v3/importlist/movie?includeRecommendations=true&includeTrending=true&includePopular=true') return response.end('[]');
+    if (transientDiscoveryFailure && request.url === '/api/v3/importlist/movie?includeRecommendations=true&includeTrending=true&includePopular=true') { transientDiscoveryFailure=false; response.statusCode=503; return response.end(JSON.stringify({error:'temporary upstream failure'})); }
     if (request.url === '/api/v3/importlist/movie?includeRecommendations=true&includeTrending=true&includePopular=true') return response.end(JSON.stringify([
       {title:'Owned Movie', tmdbId:10, isTrending:true, year:2024},
       {title:'Movie Candidate', tmdbId:20, isTrending:true, isPopular:true, year:2025},
@@ -246,13 +248,23 @@ test('movie discovery distinguishes provider failure from an empty supported res
   const fixture = await startProvisionarr(t, {RADARR_URL:`http://${LOOPBACK_HOST}:${emptyPort}`});
   const failedPayload=await (await fetch(`${failed.base}/api/discover`,{headers:{cookie:failed.cookie}})).json();
   assert.equal(failedPayload.movies.status,'unavailable');
-  assert.match(failedPayload.movies.message,/connected service could not be reached/i);
+  assert.match(failedPayload.movies.message,/connected Radarr service could not be reached/i);
   const response = await fetch(`${fixture.base}/api/discover`, {headers:{cookie:fixture.cookie}});
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.movies.status, 'empty');
   assert.equal(payload.tv.status, 'unavailable');
   assert.match(payload.tv.message,/no supported TV discovery provider is configured/i);
+});
+
+test('movie discovery retries one transient Radarr provider failure', async t => {
+  const radarr=radarrCatalogServer('retry');
+  const port=await listen(radarr);
+  t.after(()=>radarr.close());
+  const fixture=await startProvisionarr(t,{RADARR_URL:`http://${LOOPBACK_HOST}:${port}`});
+  const payload=await (await fetch(`${fixture.base}/api/discover`,{headers:{cookie:fixture.cookie}})).json();
+  assert.equal(payload.movies.status,'ready');
+  assert.equal(radarr.calls.filter(path=>path==='/api/v3/importlist/movie?includeRecommendations=true&includeTrending=true&includePopular=true').length,2);
 });
 
 test('disabled TVmaze never requests a provider, and enabled generic TV catalog is typed, validated, attributed, and private', async t => {

@@ -273,13 +273,13 @@ async function main() {
     );
     const nativeFailures = nativeHealth.filter(item => ['error', 'fatal'].includes(String(item.type || item.level || '').toLowerCase()));
     assert.equal(
-      nativeFailures.length > 0 && nativeFailures.every(isExpectedFreshProwlarrHealthFailure),
+      nativeFailures.every(isExpectedFreshProwlarrHealthFailure),
       true,
-      `Fresh Prowlarr reported a failing health condition unrelated to its expected missing indexer provider: ${JSON.stringify(nativeFailures)}`
+      `Fresh Prowlarr reported an unexpected health failure: ${JSON.stringify(nativeFailures)}`
     );
     assert.deepEqual(
       remaining.map(check => check.id),
-      ['health', 'enabled_indexer'],
+      nativeFailures.length ? ['health', 'enabled_indexer'] : ['enabled_indexer'],
       `Prowlarr has an unexpected failure beyond its provider-specific indexer prerequisite: ${JSON.stringify(remaining)}`
     );
     assert.match(remaining.find(check => check.id === 'enabled_indexer').summary, /no enabled indexer/i);

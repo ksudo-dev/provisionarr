@@ -882,6 +882,7 @@ async function requestHistory() {
 function requestCanBeStale(record) { const created=Date.parse(record?.createdAt||'');return Number.isFinite(created)&&Date.now()-created>=5*60*1000; }
 function requestStage(status) { const value=String(status||'waiting');return ({pending_approval:0,accepted:1,waiting:1,queued:2,downloading:3,importing:4,available:5,failed:-1,error:-1,stale:-1})[value]??1; }
 const RADARR_DISCOVERY_CANDIDATES = '/api/v3/importlist/movie?includeRecommendations=true&includeTrending=true&includePopular=true';
+const RADARR_DISCOVERY_RETRY_DELAY_MS = 300;
 const TV_DISCOVERY_UNAVAILABLE = 'TV discovery is unavailable because no supported TV discovery provider is configured. Sonarr is not used as a discovery-candidate provider.';
 const TVMAZE_ATTRIBUTION = 'Generic TV catalog data from TVmaze, licensed CC BY-SA.';
 function tvmazeUrl() {
@@ -939,10 +940,19 @@ async function tvmazeDiscoverySource(options={}) {
   const rows=await validateTvmazeCandidates(candidates.slice(0,40));
   return {service:services.sonarr,owned,rows,generic:true,attribution:TVMAZE_ATTRIBUTION};
 }
+async function radarrDiscoveryCandidates(service) {
+  let response=await api(service,RADARR_DISCOVERY_CANDIDATES);
+  if(response.status>=500&&response.status<600){
+    await new Promise(resolve=>setTimeout(resolve,RADARR_DISCOVERY_RETRY_DELAY_MS));
+    response=await api(service,RADARR_DISCOVERY_CANDIDATES);
+  }
+  return response;
+}
 async function movieDiscoverySource(options={}) {
   const service=services.radarr;
-  const [candidates,library]=await Promise.all([api(service,RADARR_DISCOVERY_CANDIDATES),api(service,service.library)]);
-  if(candidates.status<200||candidates.status>=300||library.status<200||library.status>=300)throw new Error('Radarr movie discovery is unavailable.');
+  const [candidates,library]=await Promise.all([radarrDiscoveryCandidates(service),api(service,service.library)]);
+  if(library.status<200||library.status>=300)throw new Error('Movie recommendations are unavailable because the connected Radarr service could not be reached.');
+  if(candidates.status<200||candidates.status>=300)throw new Error('Movie recommendations are unavailable because Radarr’s discovery provider returned an error. Your Radarr library is still connected.');
   const owned=new Set((Array.isArray(library.data)?library.data:[]).map(item=>mediaIdentity(item,service)).filter(Boolean));
   const genreCounts={};for(const item of (Array.isArray(library.data)?library.data:[]))for(const genre of (item.genres||[]))genreCounts[genre]=(genreCounts[genre]||0)+1;
   const rows=(Array.isArray(candidates.data)?candidates.data:[]).filter(item=>item.title&&!item.isExisting&&!item.isExcluded).map(raw=>({raw,item:mapMedia(raw,service),score:(raw.genres||[]).reduce((total,genre)=>total+(genreCounts[genre]||0),0)+(raw.isRecommendation?40:0)+(raw.isTrending?20:0)+(raw.isPopular?10:0)+Math.min(25,Number(raw.popularity||0)/10)})).filter(row=>(options.includeUpcoming||releaseState(row.item)!=='upcoming')&&row.item.identity&&!owned.has(row.item.identity));
@@ -980,7 +990,7 @@ async function collectDiscover(user=null,options={}) {
   const tv=tvResult.status==='fulfilled'?tvResult.value:null;
   const personal=inspired.status==='fulfilled'?inspired.value:{items:[],owned:new Set()};
   const allOwned=new Set([...(movies?.owned||[]),...(tv?.owned||[]),...personal.owned]),recommendations=personal.items;
-  const movieCatalog=discoveryCatalog(movies,recommendations,allOwned,limit,'Movie'),tvCatalog=TVMAZE_ENABLED?discoveryCatalog(tv,recommendations,allOwned,limit,'TV'):unavailableDiscoveryCatalog(TV_DISCOVERY_UNAVAILABLE);
+  const movieCatalog=movies?discoveryCatalog(movies,recommendations,allOwned,limit,'Movie'):unavailableDiscoveryCatalog(movieResult.reason?.message||'Movie recommendations are unavailable because the connected service could not be reached.'),tvCatalog=TVMAZE_ENABLED?discoveryCatalog(tv,recommendations,allOwned,limit,'TV'):unavailableDiscoveryCatalog(TV_DISCOVERY_UNAVAILABLE);
   const flatten=rail=>[...movieCatalog.rails[rail],...tvCatalog.rails[rail]];
   return {personalized:Boolean(embyUserId),type:settings.type,includeUpcoming:settings.includeUpcoming,movies:movieCatalog,tv:tvCatalog,inspired:flatten('inspired'),trending:flatten('trending'),popular:flatten('popular'),newReleases:flatten('newReleases')};
 }
